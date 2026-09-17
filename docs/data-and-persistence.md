@@ -58,3 +58,27 @@ Optional `innerDiameter` (metres) turns a circular part into a hollow cylinder. 
 Optional per-part `roofEnabled` defaults to true for legacy documents. False removes only the roof mesh/controls and roof height contribution; roof parameters remain available for re-enabling. The body stays capped. This state is included in JSON/SQLite and architectural briefs.
 
 Optional `subdivisions: {enabled, x, y, z}` stores body-preview segment counts (integers 1–64; circular x minimum 3). Circular axes mean around/height/radial. Counts do not change with physical scaling. Settings persist in JSON/SQLite; guide lines are not exported in reference images. No editable mesh is stored yet.
+
+Optional `bodyMaterial` and `roofMaterial` on parts, and `terrainMaterial` on plans, contain `{name: string, description: string}`. Legacy `materials` remains readable and serves as the body fallback until explicitly overridden; no automatic semantic split is attempted. Values are validated and stored with the plan. Manifest `materialAssignments` uses stable part IDs with body/roof roles; roof-disabled or terrain-excluded assignments are null. Descriptive metadata requires no UV coordinates. Individual face overrides are deferred.
+
+
+### Openings and wall construction
+
+Optional part fields: `hollowWalls` boolean, `wallThickness` in metres (default 0.4), and `openings[]`. Each opening has a stable `id`, `name`, `kind` (`door`, `window`, `arched-door`, `arched-window`, `circle-window`), `face` index 0–3, `x`, `y`, `width` and `height` in metres. Face i spans footprint corner i to (i+1)%4; x runs from its start, y is local component height. IDs are unique within a part. Duplication generates fresh child IDs. Openings are nested metadata, not independent top-level parts or grouping members.
+
+Circular-window width/height must match. Openings must fit below both wall-top bounds, clear side edges by 0.05 m, and have 0.05 m bounding-box clearance from other openings on the same face. Door-base notches allow contact with a level wall base. Hollow thickness must retain a valid offset interior polygon; curved walls are unsupported. At most 100 openings per part are accepted.
+
+Legacy documents omit these fields and stay solid. Hollow walls and solid recesses regenerate from editable contours. Normal dimension edits preserve opening metre dimensions; uniform scale operations scale dimensions, offsets and thickness. Invalid reductions are refused instead of deleting or silently moving openings. Reference manifests contain an explicit per-part openings/wall-construction section; plan JSON remains authoritative.
+
+Opening.infill is optional (absence means Empty). It stores type, inset,
+thickness, frameWidth, doubleDoor, bars mode, horizontal/vertical bar counts,
+and doorMaterial/frameMaterial/glassMaterial descriptions. Existing plan JSON,
+brief opening data and reference manifest opening data include these settings.
+Infill geometry is derived rather than separately placed: child selection opens
+the parent opening's settings. Scaling also scales its physical dimensions.
+
+Infill.gapWidth is optional, defaults to 0.01 m and scales with the component.
+Geometry caps the effective gap at 80% of opening width so narrow targets retain
+door leaves. Bulk infill application copies settings independently without changing
+target shape, position or dimensions. Similar-size matching checks both width and
+height against the source within 20%; matching category follows opening kind.

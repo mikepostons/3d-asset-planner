@@ -69,3 +69,37 @@ Add mode selects a cube, cylinder or hollow ring from `primitive()` in the model
 Hollow rings use connected annular surfaces with a real hole through wall and cap geometry; independent top/bottom inner and outer diameters define linear taper. They remain circular parts with an optional `innerDiameter`; diameter and height edits use the existing component/undo pipeline. Their outer footprint remains the approximation used for structures and terrain, so a part in the bore may be considered connected.
 
 X-ray is transient editor state: rebuild applies transparency to component materials and clears edge depth testing. Reference capture rebuilds opaque components, hides aids, then restores the previous X-ray state. Circular radius controls bypass Select submode filtering because circular parts do not expose footprint-corner vertices.
+
+
+## Wall openings
+
+`src/openings.ts` owns opening types, shape contours, local wall frames, validation, scaling and body geometry with apertures. The existing geometry dispatcher selects this builder for hollow parts or parts with openings. It triangulates planar wall contours with holes; doors touching a level base become boundary notches. Hollow parts add offset interior wall surfaces, reveals, top wall strips and a floor slab. Solid parts add reveal sides and a back surface for shallow recesses. Roof construction stays independent.
+
+Stage face selection records the component and wall index. Drawing projects pointer rays onto that wall's plane and converts world points into local wall coordinates. Invalid candidates show red and cannot commit. Active-face highlights reuse exterior wall triangles so they do not cover cutouts. Opening outlines and selected depth guides live in editor aids, omitted from reference capture. SceneTree shows nested opening entries; the React sidebar edits their parameters using the normal validated history pipeline.
+
+These cuts do not use accumulated destructive CSG. Wall topology regenerates on each change. This is not yet a general-purpose boolean editor, arbitrary face topology editor or UV workflow.
+
+Opening selection projects the pointer onto each opening's wall-local plane,
+checks its actual outline and excludes occluded openings unless X-ray is active.
+Selected opening handles take priority over ordinary component editing handles.
+Opening drag previews share the creation preview path; the document changes only
+on a valid pointer release. The pure editOpening helper implements snapping and
+opposite-edge anchoring, including equal-diameter circular window resizing.
+
+Hollow-wall opening reveals use a constant offset along the wall normal. Inner
+wall boundaries retain their mitered corners, but inner cut contours preserve
+the exterior opening coordinates and are triangulated separately.
+
+src/infills.ts generates separate door leaf, frame, bar and pane meshes in the
+parent part's local wall coordinates. Convex outline clipping fits bars and split
+door leaves to rectangle, arched and circular contours. Meshes live in the solids
+group, so they appear in reference captures and participate in X-ray rendering.
+The pane is an opaque blue-grey blockout surface, not simulated transparent glass.
+Material descriptions are metadata and do not change viewport shading.
+
+Opening multi-selection is transient UI state, scoped to one part/wall. Stage
+chooseOpening implements Shift toggling; group move previews derive all selected
+positions from one snapped delta and validate the entire candidate plan.
+opening-groups.ts duplicates with fresh IDs, deep-copied infills and a shared
+translation, searching candidate positions before committing. No overlapping
+temporary copies enter persisted state; undo/deletion prunes stale selected IDs.

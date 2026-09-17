@@ -12,7 +12,18 @@ export function SceneTree({
   selected,
   select,
   commit,
+  selectedOpening,
+  selectedOpenings,
+  selectOpening,
 }: {
+  selectedOpening: string | null;
+  selectedOpenings: string[];
+  selectOpening: (
+    partId: string,
+    id: string,
+    face: number,
+    shift?: boolean,
+  ) => void;
   plan: Plan;
   selected: string | null;
   select: (id: string) => void;
@@ -160,14 +171,56 @@ export function SceneTree({
     );
   }
   const [editing, setEditing] = useState<string | null>(null);
+  function partRow(p: Part) {
+    return row(
+      p.id,
+      p.name,
+      (n) => renamePart(p, n),
+      undefined,
+      p.openings?.length ? (
+        <details className="opening-tree" open>
+          <summary>
+            Openings{" "}
+            <span className="component-count">{p.openings.length}</span>
+          </summary>
+          {p.openings.map((o) => (
+            <div key={o.id}>
+              <button
+                className={
+                  selectedOpenings.includes(o.id) && selected === p.id
+                    ? "chosen wide"
+                    : "wide"
+                }
+                onClick={(e) => selectOpening(p.id, o.id, o.face, e.shiftKey)}
+              >
+                {o.name}
+              </button>
+              {o.infill && (
+                <button
+                  className="wide"
+                  style={{ paddingLeft: 24 }}
+                  onClick={(e) => selectOpening(p.id, o.id, o.face, e.shiftKey)}
+                >
+                  ↳{" "}
+                  {o.infill.type === "door"
+                    ? o.infill.doubleDoor
+                      ? "Double door"
+                      : "Door panel"
+                    : "Window · frame & pane"}
+                </button>
+              )}
+            </div>
+          ))}
+        </details>
+      ) : undefined,
+    );
+  }
   function contents(groupId?: string) {
     return structures
       .filter((s) => s.parts[0].groupId === groupId)
       .map((s) =>
         s.parts.length === 1
-          ? row(s.parts[0].id, s.parts[0].name, (n) =>
-              renamePart(s.parts[0], n),
-            )
+          ? partRow(s.parts[0])
           : row(
               "structure:" + s.id,
               s.name,
@@ -177,7 +230,7 @@ export function SceneTree({
                   structureNames: { ...plan.structureNames, [s.id]: n },
                 }),
               s.parts.length,
-              s.parts.map((p) => row(p.id, p.name, (n) => renamePart(p, n))),
+              s.parts.map(partRow),
             ),
       );
   }

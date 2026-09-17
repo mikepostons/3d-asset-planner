@@ -1,3 +1,12 @@
+import { infillGeometry } from "./infills";
+import {
+  editOpening,
+  wallFrame,
+  openingOutline,
+  openingName,
+  type OpeningKind,
+  type Opening,
+} from "./openings";
 import { subdivisionPreview } from "./subdivisions";
 import { terrainPatches } from "./terrain";
 import { referenceViews, flatView, viewPose } from "./views";
@@ -29,8 +38,11 @@ import {
   translateSelection,
 } from "./model";
 import { primitive, type Primitive } from "./model";
-export type Tool = "add" | "select" | "draw" | "move" | "rotate" | "scale";
+export type Tool =
+  "openings" | "add" | "select" | "draw" | "move" | "rotate" | "scale";
 type Callbacks = {
+  face: (face: { partId: string; index: number } | null) => void;
+  opening: (id: string | null, ids?: string[]) => void;
   tool: (tool: Tool) => void;
   select: (id: string | null) => void;
   commit: (d: Plan) => void;
@@ -49,6 +61,21 @@ export class Stage {
   plan: Plan;
   selected: string | null = null;
   tool: Tool = "select";
+  activeFace: { partId: string; index: number } | null = null;
+  selectedOpening: string | null = null;
+  selectedOpenings: string[] = [];
+  openingKind: OpeningKind = "door";
+  openingDrag: {
+    start: T.Vector2;
+    partId: string;
+    face: number;
+    capture: number;
+    candidate?: Opening;
+    original?: Opening;
+    originals?: Opening[];
+    candidates?: Opening[];
+    handle?: string;
+  } | null = null;
   selectionMode: SelectionMode = "vertices";
   view = "main";
   drawShape: "rectangle" | "circle" = "rectangle";
@@ -140,7 +167,10 @@ export class Stage {
     g.clear();
   }
   update(d: Plan, selected: string | null, tool: Tool) {
-    if (this.drag && (tool !== this.tool || selected !== this.selected))
+    if (
+      (this.drag || this.openingDrag) &&
+      (tool !== this.tool || selected !== this.selected)
+    )
       this.cancel();
     if (tool !== this.tool || selected !== this.selected) this.moveAxes = false;
     this.disposeGroup(this.preview);
@@ -149,11 +179,12 @@ export class Stage {
     this.tool = tool;
     this.controls.enableRotate = !flatView(this.view) && tool === "select";
     this.host.style.cursor =
-      tool === "draw" || tool === "add"
+      tool === "draw" || tool === "add" || tool === "openings"
         ? "crosshair"
         : tool === "move"
           ? "move"
           : "default";
+    if (this.activeFace?.partId !== selected) this.activeFace = null;
     this.rebuild();
   }
   roof(p: Part) {
@@ -263,12 +294,151 @@ export class Stage {
       wall.userData.wall = true;
       wall.userData.part = p.id;
       group.add(wall);
+      for (const o of p.openings ?? [])
+        for (const item of infillGeometry(p, o)) {
+          const mesh = new T.Mesh(
+            item.geometry,
+            new T.MeshStandardMaterial({
+              color: item.color,
+              roughness: 0.85,
+              side: T.DoubleSide,
+            }),
+          );
+          mesh.name = item.role;
+          mesh.userData = { part: p.id, openingId: o.id, infill: true };
+          group.add(mesh);
+        }
       const roof = p.roofEnabled === false ? null : this.roof(p);
       if (roof) {
         roof.userData.part = p.id;
         group.add(roof);
       }
       this.solids.add(group);
+      if (this.activeFace?.partId === p.id && p.shape !== "circle") {
+        const f = wallFrame(p, this.activeFace.index);
+        const attr = wall.geometry.getAttribute("position"),
+          positions: number[] = [];
+        for (let i = 0; i < attr.count; i += 3) {
+          const pts = [0, 1, 2].map((k) =>
+            new T.Vector3().fromBufferAttribute(attr, i + k),
+          );
+          if (
+            pts.every(
+              (v) => Math.abs(v.clone().sub(f.a).dot(f.inward)) < 0.0001,
+            )
+          )
+            positions.push(...pts.flatMap((v) => v.toArray()));
+        }
+        const geom = new T.BufferGeometry();
+        geom.setAttribute(
+          "position",
+          new T.Float32BufferAttribute(positions, 3),
+        );
+        const overlay = new T.Mesh(
+          geom,
+          new T.MeshBasicMaterial({
+            color: 0xe0fff7,
+            transparent: true,
+            opacity: 0.18,
+            side: T.DoubleSide,
+            depthWrite: false,
+            polygonOffset: true,
+            polygonOffsetFactor: -2,
+          }),
+        );
+        overlay.position.copy(group.position);
+        overlay.rotation.copy(group.rotation);
+        overlay.renderOrder = 3;
+        this.aids.add(overlay);
+      }
+      for (const o of p.openings ?? []) {
+        const f = wallFrame(p, o.face),
+          outline = openingOutline(o),
+          points = outline.map((v) => f.point(v.x, v.y));
+        points.push(points[0].clone());
+        const line = new T.Line(
+          new T.BufferGeometry().setFromPoints(points),
+          new T.LineBasicMaterial({
+            color:
+              this.selectedOpenings.includes(o.id) && p.id === this.selected
+                ? 0xffce7b
+                : 0x6de8d5,
+            transparent: true,
+            opacity: 0.9,
+            depthTest: false,
+          }),
+        );
+        line.position.copy(group.position);
+        line.rotation.copy(group.rotation);
+        line.renderOrder = 8;
+        this.aids.add(line);
+        if (this.selectedOpenings.includes(o.id) && p.id === this.selected) {
+          const back = points.map((v) =>
+            v
+              .clone()
+              .addScaledVector(
+                f.inward,
+                p.hollowWalls
+                  ? (p.wallThickness ?? 0.4)
+                  : Math.min(p.wallThickness ?? 0.4, 0.2),
+              ),
+          );
+          const segments: T.Vector3[] = [];
+          for (let k = 0; k < points.length - 1; k++)
+            segments.push(points[k], back[k], back[k], back[k + 1]);
+          const depth = new T.LineSegments(
+            new T.BufferGeometry().setFromPoints(segments),
+            new T.LineBasicMaterial({
+              color: 0xffce7b,
+              transparent: true,
+              opacity: 0.55,
+              depthTest: false,
+            }),
+          );
+          depth.position.copy(group.position);
+          depth.rotation.copy(group.rotation);
+          depth.renderOrder = 8;
+          this.aids.add(depth);
+          if (this.tool === "select") {
+            for (const [key, u, v] of [
+              ["move", 0.5, 0.5],
+              ["w", 0, 0.5],
+              ["e", 1, 0.5],
+              ["s", 0.5, 0],
+              ["n", 0.5, 1],
+              ["sw", 0, 0],
+              ["se", 1, 0],
+              ["nw", 0, 1],
+              ["ne", 1, 1],
+            ] as [string, number, number][]) {
+              if (this.selectedOpenings.length > 1 && key !== "move") continue;
+              const handle = new T.Mesh(
+                new T.SphereGeometry(key === "move" ? 0.14 : 0.1, 12, 8),
+                new T.MeshBasicMaterial({
+                  color: key === "move" ? 0x61ead2 : 0xffce7b,
+                  depthTest: false,
+                }),
+              );
+              handle.position.copy(
+                f
+                  .point(o.x + o.width * u, o.y + o.height * v)
+                  .applyAxisAngle(
+                    new T.Vector3(0, 1, 0),
+                    (p.rotation * Math.PI) / 180,
+                  )
+                  .add(group.position),
+              );
+              handle.userData = {
+                openingHandle: key,
+                openingId: o.id,
+                partId: p.id,
+              };
+              handle.renderOrder = 12;
+              this.aids.add(handle);
+            }
+          }
+        }
+      }
       if (p.subdivisions?.enabled) {
         const { geometry } = subdivisionPreview(p);
         const overlay = new T.LineSegments(
@@ -576,9 +746,77 @@ export class Stage {
     this.cb.tool("select");
     this.cb.hint("Select mode");
   };
+  chooseOpening(partId: string, id: string, face: number, shift = false) {
+    const same = this.selected === partId && this.activeFace?.index === face;
+    if (shift && this.selectedOpenings.length && !same) {
+      this.cb.hint("Select openings on the same wall to move them together.");
+      return false;
+    }
+    const ids =
+      shift && same
+        ? this.selectedOpenings.includes(id)
+          ? this.selectedOpenings.filter((v) => v !== id)
+          : [...this.selectedOpenings, id]
+        : [id];
+    this.cb.select(partId);
+    this.cb.face({ partId, index: face });
+    this.cb.opening(ids.at(-1) ?? null, ids);
+    return true;
+  }
   down = (e: PointerEvent) => {
     this.tooltip.hidden = true;
     if (e.button !== 0) return;
+    if (this.tool === "select") {
+      const hit = this.pickOpening(e);
+      if (hit) {
+        const { p, o, handle } = hit;
+        const point = this.openingPoint(e, p, o.face);
+        if (e.shiftKey) {
+          this.chooseOpening(p.id, o.id, o.face, true);
+          e.stopImmediatePropagation();
+          return;
+        }
+        const already =
+          this.selected === p.id && this.selectedOpenings.includes(o.id);
+        if (!already) this.chooseOpening(p.id, o.id, o.face);
+        if (point && already) {
+          this.openingDrag = {
+            start: point,
+            partId: p.id,
+            face: o.face,
+            capture: e.pointerId,
+            original: { ...o },
+            originals:
+              handle === "move"
+                ? (p.openings ?? [])
+                    .filter((v) => this.selectedOpenings.includes(v.id))
+                    .map((v) => ({ ...v }))
+                : undefined,
+            handle,
+          };
+          this.controls.enabled = false;
+          this.renderer.domElement.setPointerCapture(e.pointerId);
+        }
+        e.stopImmediatePropagation();
+        return;
+      }
+    }
+    if (this.tool === "openings") {
+      const p = this.plan.parts.find((p) => p.id === this.activeFace?.partId);
+      if (!p || !this.activeFace) return;
+      const point = this.openingPoint(e, p, this.activeFace.index);
+      if (!point) return;
+      this.openingDrag = {
+        start: point,
+        partId: p.id,
+        face: this.activeFace.index,
+        capture: e.pointerId,
+      };
+      this.controls.enabled = false;
+      this.renderer.domElement.setPointerCapture(e.pointerId);
+      e.stopImmediatePropagation();
+      return;
+    }
     if (this.tool === "add") {
       const p = this.placement(e);
       if (!p) return;
@@ -617,6 +855,42 @@ export class Stage {
     let kind = handle?.userData.handle as string | undefined,
       id = (handle?.userData.part || body?.object.userData.part) as
         string | undefined;
+    if (
+      this.tool === "select" &&
+      this.selectionMode === "faces" &&
+      body?.object.userData.wall &&
+      !axis
+    ) {
+      const part = this.plan.parts.find(
+        (p) => p.id === body.object.userData.part,
+      );
+      if (part && part.shape !== "circle") {
+        const local = body.object.parent!.worldToLocal(body.point.clone());
+        const normal = body.face?.normal;
+        if (normal && Math.abs(normal.y) < 0.5) {
+          let best = 0,
+            dist = Infinity;
+          for (let i = 0; i < 4; i++) {
+            const f = wallFrame(part, i),
+              d = Math.abs(local.clone().sub(f.a).dot(f.inward));
+            if (d < dist) {
+              dist = d;
+              best = i;
+            }
+          }
+          if (
+            this.activeFace?.partId !== part.id ||
+            this.activeFace.index !== best
+          ) {
+            this.cb.select(part.id);
+            this.cb.face({ partId: part.id, index: best });
+            this.cb.opening(null);
+            e.stopImmediatePropagation();
+            return;
+          }
+        }
+      }
+    }
     if (this.tool === "draw") {
       kind = "draw";
       id = undefined;
@@ -702,6 +976,103 @@ export class Stage {
     this.tooltip.hidden = true;
     this.disposeGroup(this.preview);
   };
+  pickOpening(e: PointerEvent) {
+    this.getRay(e);
+    const handleHit = this.ray
+      .intersectObjects(this.aids.children)
+      .find((h) => h.object.userData.openingHandle);
+    if (handleHit) {
+      const data = handleHit.object.userData;
+      const p = this.plan.parts.find((p) => p.id === data.partId)!;
+      return {
+        p,
+        o: p.openings!.find((o) => o.id === data.openingId)!,
+        handle: data.openingHandle as string,
+      };
+    }
+    const solidDistance =
+      this.ray
+        .intersectObjects(this.solids.children, true)
+        .find((hit) => hit.object instanceof T.Mesh)?.distance ?? Infinity;
+    const candidates: {
+      p: Part;
+      o: Opening;
+      handle: string;
+      distance: number;
+    }[] = [];
+    for (const p of this.plan.parts)
+      for (const o of p.openings ?? []) {
+        const q = this.openingPoint(e, p, o.face);
+        if (!q) continue;
+        const polygon = openingOutline(o);
+        let inside = false;
+        for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+          const a = polygon[i],
+            b = polygon[j];
+          if (
+            a.y > q.y !== b.y > q.y &&
+            q.x < ((b.x - a.x) * (q.y - a.y)) / (b.y - a.y) + a.x
+          )
+            inside = !inside;
+        }
+        // A screen-space border tolerance stays easy to hit at any zoom.
+        const rect = this.renderer.domElement.getBoundingClientRect();
+        const screen = (v: T.Vector2) => {
+          const q = wallFrame(p, o.face)
+            .point(v.x, v.y)
+            .applyAxisAngle(
+              new T.Vector3(0, 1, 0),
+              (p.rotation * Math.PI) / 180,
+            )
+            .add(new T.Vector3(p.x, baseY(p), p.z))
+            .project(this.camera);
+          return new T.Vector2(
+            rect.left + ((q.x + 1) * rect.width) / 2,
+            rect.top + ((1 - q.y) * rect.height) / 2,
+          );
+        };
+        const mouse = new T.Vector2(e.clientX, e.clientY);
+        let near = false;
+        for (let i = 0; i < polygon.length; i++) {
+          const a = screen(polygon[i]),
+            b = screen(polygon[(i + 1) % polygon.length]),
+            ab = b.clone().sub(a);
+          const t = T.MathUtils.clamp(
+            mouse.clone().sub(a).dot(ab) / Math.max(ab.lengthSq(), 0.001),
+            0,
+            1,
+          );
+          if (mouse.distanceTo(a.addScaledVector(ab, t)) <= 10) near = true;
+        }
+        if (!inside && !near) continue;
+        const world = wallFrame(p, o.face)
+          .point(q.x, q.y)
+          .applyAxisAngle(new T.Vector3(0, 1, 0), (p.rotation * Math.PI) / 180)
+          .add(new T.Vector3(p.x, baseY(p), p.z));
+        const distance = world.distanceTo(this.ray.ray.origin);
+        if (this.xray || distance <= solidDistance + 0.05)
+          candidates.push({ p, o, handle: "move", distance });
+      }
+    return candidates.sort((a, b) => a.distance - b.distance)[0];
+  }
+  openingPoint(e: PointerEvent, p: Part, face: number) {
+    this.getRay(e);
+    const f = wallFrame(p, face),
+      rotation = new T.Matrix4().makeRotationY((p.rotation * Math.PI) / 180);
+    const origin = f.a
+        .clone()
+        .applyMatrix4(rotation)
+        .add(new T.Vector3(p.x, baseY(p), p.z)),
+      normal = f.inward.clone().transformDirection(rotation);
+    const hit = this.planePoint(
+      new T.Plane().setFromNormalAndCoplanarPoint(normal, origin),
+    );
+    if (!hit) return null;
+    const local = hit
+      .sub(new T.Vector3(p.x, baseY(p), p.z))
+      .applyAxisAngle(new T.Vector3(0, 1, 0), (-p.rotation * Math.PI) / 180);
+    return new T.Vector2(local.clone().sub(f.a).dot(f.u), local.y);
+  }
   placement(e: PointerEvent) {
     this.getRay(e);
     const body = this.ray
@@ -718,6 +1089,89 @@ export class Stage {
     return p;
   }
   move = (e: PointerEvent) => {
+    if (this.openingDrag) {
+      e.stopImmediatePropagation();
+      const drag = this.openingDrag,
+        p = this.plan.parts.find((p) => p.id === drag.partId)!;
+      const q = this.openingPoint(e, p, drag.face);
+      if (!q) return;
+      const step = this.plan.moduleSize / this.plan.subdivision,
+        f = wallFrame(p, drag.face);
+      const x = snap(Math.min(q.x, drag.start.x), step),
+        y = snap(Math.min(q.y, drag.start.y), step);
+      let width = Math.max(step, snap(Math.abs(q.x - drag.start.x), step)),
+        h = Math.max(step, snap(Math.abs(q.y - drag.start.y), step));
+      if (this.openingKind === "circle-window") width = h = Math.max(width, h);
+      const bottom = this.openingKind.endsWith("door")
+        ? Math.max(f.baseA, f.baseB)
+        : y;
+      let o: Opening = {
+        id: "opening-preview",
+        name: openingName(this.openingKind),
+        kind: this.openingKind,
+        face: drag.face,
+        x,
+        y: bottom,
+        width,
+        height: h,
+      };
+      if (drag.original)
+        o = editOpening(
+          drag.original,
+          drag.handle ?? "move",
+          q.x - drag.start.x,
+          q.y - drag.start.y,
+          step,
+          Math.max(f.baseA, f.baseB),
+        );
+      const candidates = drag.originals?.length
+        ? drag.originals.map((v) => ({
+            ...v,
+            x: v.x + o.x - drag.original!.x,
+            y: v.y + o.y - drag.original!.y,
+          }))
+        : [o];
+      const replaced = new Set(
+        drag.originals?.map((v) => v.id) ?? [drag.original?.id],
+      );
+      const next = clone(this.plan);
+      next.parts.find((p) => p.id === drag.partId)!.openings = [
+        ...(p.openings ?? []).filter((v) => !replaced.has(v.id)),
+        ...candidates,
+      ];
+      this.disposeGroup(this.preview);
+      let valid = true;
+      try {
+        validate(next);
+      } catch (error) {
+        valid = false;
+        this.cb.hint(String(error));
+      }
+      drag.candidate = valid ? o : undefined;
+      drag.candidates = valid ? candidates : undefined;
+      for (const candidate of candidates) {
+        const pts = openingOutline(candidate).map((v) => f.point(v.x, v.y));
+        pts.push(pts[0].clone());
+        const line = new T.Line(
+          new T.BufferGeometry().setFromPoints(pts),
+          new T.LineBasicMaterial({
+            color: valid ? 0x61ead2 : 0xff7777,
+            depthTest: false,
+            transparent: true,
+          }),
+        );
+        line.position.set(p.x, baseY(p), p.z);
+        line.rotation.y = (p.rotation * Math.PI) / 180;
+        line.renderOrder = 20;
+        this.preview.add(line);
+      }
+      this.scene.add(this.preview);
+      if (valid)
+        this.cb.hint(
+          `${o.name}: ${o.width.toFixed(2)} × ${o.height.toFixed(2)} m · release to ${drag.original ? "apply" : "create"}`,
+        );
+      return;
+    }
     if (this.tool === "add") {
       this.disposeGroup(this.preview);
       const p = this.placement(e);
@@ -739,6 +1193,41 @@ export class Stage {
       return;
     }
     if (!this.drag) {
+      const opening = this.tool === "select" ? this.pickOpening(e) : null;
+      if (opening) {
+        this.disposeGroup(this.hover);
+        const { p, o } = opening,
+          f = wallFrame(p, o.face);
+        const pts = openingOutline(o).map((v) => f.point(v.x, v.y));
+        pts.push(pts[0].clone());
+        const line = new T.Line(
+          new T.BufferGeometry().setFromPoints(pts),
+          new T.LineBasicMaterial({ color: 0xffffff, depthTest: false }),
+        );
+        line.position.set(p.x, baseY(p), p.z);
+        line.rotation.y = (p.rotation * Math.PI) / 180;
+        line.renderOrder = 25;
+        this.hover.add(line);
+        this.host.style.cursor =
+          opening.handle === "move" ? "move" : "crosshair";
+        this.tooltip.textContent =
+          o.name +
+          " · " +
+          (opening.handle === "move"
+            ? "Select / move opening"
+            : "Resize opening");
+        this.tooltip.hidden = false;
+        this.tooltip.style.left =
+          Math.min(
+            e.clientX + 14,
+            window.innerWidth - this.tooltip.offsetWidth - 8,
+          ) + "px";
+        this.tooltip.style.top =
+          Math.max(8, e.clientY - this.tooltip.offsetHeight - 12) + "px";
+        return;
+      }
+      this.host.style.cursor =
+        this.tool === "select" ? "default" : this.host.style.cursor;
       this.showHover(e);
       this.showTooltip(e);
       return;
@@ -1437,6 +1926,37 @@ export class Stage {
     }
   }
   up = (e: PointerEvent) => {
+    if (this.openingDrag) {
+      e.stopImmediatePropagation();
+      const drag = this.openingDrag;
+      this.openingDrag = null;
+      this.controls.enabled = true;
+      this.disposeGroup(this.preview);
+      if (this.renderer.domElement.hasPointerCapture(e.pointerId))
+        this.renderer.domElement.releasePointerCapture(e.pointerId);
+      if (drag.candidate) {
+        const next = clone(this.plan),
+          o = { ...drag.candidate, id: drag.original?.id ?? uid() };
+        const copies = drag.original ? (drag.candidates ?? [o]) : [o];
+        const ids = new Set(copies.map((v) => v.id));
+        next.parts.find((p) => p.id === drag.partId)!.openings = [
+          ...(
+            next.parts.find((p) => p.id === drag.partId)!.openings ?? []
+          ).filter((v) => !ids.has(v.id)),
+          ...copies,
+        ];
+        this.cb.commit(next);
+        this.cb.opening(
+          o.id,
+          copies.map((v) => v.id),
+        );
+        this.cb.tool("select");
+        this.cb.hint(
+          "Opening ready · drag its centre to move, or handles to resize",
+        );
+      }
+      return;
+    }
     if (!this.drag) return;
     e.stopImmediatePropagation();
     const last = this.drag.last;
@@ -1455,6 +1975,14 @@ export class Stage {
     this.cb.hint("Ready");
   };
   cancel = () => {
+    if (this.openingDrag) {
+      const id = this.openingDrag.capture;
+      this.openingDrag = null;
+      this.controls.enabled = true;
+      if (this.renderer.domElement.hasPointerCapture(id))
+        this.renderer.domElement.releasePointerCapture(id);
+    }
+
     this.disposeGroup(this.preview);
     if (!this.drag) return;
     this.plan = this.drag.initial;

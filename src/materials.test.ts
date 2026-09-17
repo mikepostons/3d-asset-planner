@@ -1,0 +1,22 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {fresh,part,validate,brief} from './model';
+import {materialMetadata,bodyMaterial} from './materials';
+test('material assignments round-trip and respect disabled surfaces',()=>{
+ const d=fresh(),p=part();d.parts=[p];
+ assert.equal(bodyMaterial(p).description,p.materials);
+ p.bodyMaterial={name:'Granite',description:'Pale lime mortar'};
+ p.roofMaterial={name:'Slate',description:'Weathered and patched'};
+ d.terrainMaterial={name:'Mud',description:'Gravel and wheel ruts'};
+ assert.deepEqual(validate(JSON.parse(JSON.stringify(d))),d);
+ assert.match(brief(d),/Roof material: Slate — Weathered and patched/);
+ assert.match(brief(d),/Terrain material: Mud — Gravel and wheel ruts/);
+ assert.equal(materialMetadata(d).components[0].body.name,'Granite');
+ p.roofEnabled=false;d.terrain='none';
+ assert.equal(materialMetadata(d).components[0].roof,null);
+ assert.equal(materialMetadata(d).terrain,null);
+ assert.doesNotMatch(brief(d),/Roof material: Slate/);
+ assert.equal(p.roofMaterial.name,'Slate');
+ (p as any).bodyMaterial={name:42,description:'bad'};
+ assert.throws(()=>validate(d));
+});

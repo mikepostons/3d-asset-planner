@@ -39,7 +39,7 @@ Escape cancels a drag. Command/Ctrl-Z undoes, Shift-Command/Ctrl-Z redoes. Orbit
 
 ## Current limits
 
-A scene may contain multiple structures and detached parts per export. Footprints can be circular, or begin as rectangles and support convex four-corner edits; corners cannot cross or become concave. Walls remain vertical. Flat, gable and lean-to roofs. Face handles move that wall while leaving the opposite wall in place. Corner handles reshape the footprint. Gable and lean-to roof surfaces follow the edited footprint. Heights use grid subdivisions and snap to other parts’ eaves and roof tops; moving parts and editing footprint handles snap to nearby corner/edge coordinates. Explicit wall height can be shorter than a floor module. Roof intersections remain separate overlapping volumes; a non-blocking note explains this. No doors/windows, complex roof junctions, arbitrary mesh sculpting or production GLB export yet. This is a concept geometry tool, not a finished game-asset modeller.
+A scene may contain multiple structures and detached parts per export. Footprints can be circular, or begin as rectangles and support convex four-corner edits; corners cannot cross or become concave. Walls remain vertical. Flat, gable and lean-to roofs. Face handles move that wall while leaving the opposite wall in place. Corner handles reshape the footprint. Gable and lean-to roof surfaces follow the edited footprint. Heights use grid subdivisions and snap to other parts’ eaves and roof tops; moving parts and editing footprint handles snap to nearby corner/edge coordinates. Explicit wall height can be shorter than a floor module. Roof intersections remain separate overlapping volumes; a non-blocking note explains this. Straight-wall openings and optional hollow walls are supported. Curved-wall openings, complex roof junctions, arbitrary mesh sculpting and production GLB export remain outside the current release. This is a concept geometry tool, not a finished game-asset modeller.
 
 ## Development
 
@@ -151,3 +151,22 @@ In **Select → Edges**, hover anywhere along a straight wall edge to highlight 
 Component Settings uses collapsible Organisation/aspect, Dimensions, Position, Floors/walls, Elevation/rotation, Roof and Materials sections. Duplicate/Delete stay in the footer while properties scroll. Disable **Roof enabled** to remove the roof mesh and its handles, leaving a plain capped volume; re-enable to restore the saved roof settings. The choice is saved and respected by reference exports.
 
 **Component Settings → Subdivisions** enables an amber body-surface preview. Rectangular parts use local X/Y/Z segment counts; circular parts use Around, Height and Radial/wall thickness counts. The estimate counts surface patches, not final triangles. Roofs are excluded. This first stage does not add editable vertices or unwrap UVs; see the development plan for conversion/export.
+
+### Material descriptions
+
+Use Component Settings → Materials for separate **Body material** and **Roof material** names/descriptions. Scene Settings contains **Terrain material**. These describe intended appearance; they do not generate textures or change viewport colours. Values travel in plan JSON, the architectural brief and manifest `materialAssignments`. Disabled roof descriptions are retained for re-enabling but omitted from active assignments. Excluded terrain is likewise omitted from active assignments. Older combined material notes appear in Body description unchanged; separate roof notes manually where needed.
+
+
+## Doors, windows and hollow walls
+
+1. Select a component, choose **Select → Faces**, then click a straight wall. The active face becomes lighter; the first click activates it rather than moving it.
+2. Open **Openings** in the toolbar. Its icon grid offers Door, Window, Arched door, Arched window and Circular window. Rounded variants have arched tops.
+3. Enable **Hollow walls** in that menu for through-openings, or leave the body solid for recesses. Default wall thickness is 0.4 m and can be changed under **Walls & openings**.
+4. Pick a shape and drag on the highlighted wall. Drawing snaps to the scene subdivisions; doors start at the wall base. Red outlines indicate invalid placement; release creates only valid openings. Escape cancels.
+5. Select the nested **Component → Openings** entry to edit its name, dimensions, wall-start offset and sill/base height. The selected opening shows a depth outline through surfaces. Whole-scene X-ray remains optional.
+
+Openings remain attached to their parent when moved or rotated. Ordinary wall resizing retains metre sizes/offsets and refuses changes that no longer fit the openings. Uniform part/group or module rescaling scales openings and thickness together. Duplicate part copies its openings; Delete opening removes just that opening. Undo/redo covers creation, settings and deletion.
+
+Hollow walls have a simple 0.12 m floor slab below the component base and retain the existing roof setting; there are no internal storeys. Walls regenerate around opening contours, including reveals and inner surfaces. Solid recesses are at most 0.2 m deep (or wall thickness if smaller). No door panels, frames or glazing are generated. Circular walls, roof openings and overlapping openings are not yet supported. Straight convex four-corner footprints are supported, with thickness validation to preserve an interior.
+
+The JSON, brief and manifest store opening shapes and wall-relative dimensions. Reference PNGs show the same cuts but omit active-face highlights and depth guides. These remain structural concept models; no production mesh export or UV unwrap is added by this feature.

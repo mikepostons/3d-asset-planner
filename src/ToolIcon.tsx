@@ -1,5 +1,6 @@
 import React from "react";
 const paths: Record<string, string> = {
+  openings: "M5 21V9a7 7 0 0 1 14 0v12Z M9 21v-9h6v9",
   add: "M12 4v16 M4 12h16",
   settings:
     "M9 3h6l1 3 3 1 2 5-2 5-3 1-1 3H9l-1-3-3-1-2-5 2-5 3-1 1-3z M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0",

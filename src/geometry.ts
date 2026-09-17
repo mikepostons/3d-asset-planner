@@ -1,3 +1,4 @@
+import { openingBodyGeometry } from "./openings";
 import { ConvexGeometry } from "three/addons/geometries/ConvexGeometry.js";
 import * as T from "three";
 import { footprint, height, ridgeEnds, type Part } from "./model";
@@ -17,6 +18,8 @@ function clip(points: Point[], axis: number, positive: boolean): Point[] {
   return out;
 }
 export function partGeometry(p: Part, roof: boolean): T.BufferGeometry {
+  if (!roof && (p.hollowWalls || p.openings?.length))
+    return openingBodyGeometry(p);
   if (roof && p.roofEnabled === false) return new T.BufferGeometry();
   if (p.shape === "circle" && p.innerDiameter !== undefined) {
     // Linear annular taper: all four diameters remain independent.

@@ -29,7 +29,7 @@ Snapshot: 17 September 2026. Completed means implemented in the current source; 
 
 ## Known limits / not yet implemented
 
-- Doors/windows and other opening markers or cutouts.
+- Curved-wall and roof openings, door panels, frames and glazing.
 - Arbitrary concave footprints, mesh sculpting or a general roof-junction solver.
 - Boolean merging, watertight guarantees, production meshes, UVs, textures, GLB or engine packaging.
 - Whole-group rotation, nested groups and reusable linked building instances.
@@ -64,3 +64,44 @@ Straight wall edges now highlight and accept dragging along their full length in
 Component Settings is wider and grouped into accordions, with a fixed action footer. Roof enable/disable removes/restores roof geometry without discarding its settings. Automated suite: 33 tests.
 
 Subdivision body preview is available with local axis/circular counts and surface-patch estimates. Editable mesh conversion, roof subdivisions and UV export remain planned. Automated suite: 34 tests.
+
+Separate named body/roof/terrain descriptions now persist and export through JSON, architectural briefs and manifest assignments. Surface overrides, rendered materials and UV unwrapping remain unimplemented. Automated suite: 35 tests.
+
+
+## Straight-wall openings
+
+Completed: face activation/highlight, conditional Openings icon menu, five opening shapes drawn on wall planes, nested opening entries, numeric sizes/offsets, hollow walls with default 0.4 m thickness, reveals and floor slab, solid recesses, selected-opening depth outlines, persistence/brief/manifest support, undo and transform support. Invalid wall fits, overlaps and collapsed interiors are rejected. Automated suite: 38 tests.
+
+### Direct opening editing
+Select an opening on its wall or in the component tree. Drag the teal centre
+handle to move it on that wall; amber edge/corner handles resize it. Changes snap
+to grid increments; circular windows retain equal dimensions. Doors snap to the
+wall base when close. A preview shows invalid wall bounds/collisions in red and
+does not commit them. Escape cancels; a completed drag is one undo step.
+
+Opening reveals now run perpendicular to the wall face: the inner contour keeps
+the same size and alignment as the outer contour, including off-centre openings.
+
+### Opening infills
+Each opening can remain Empty or generate a fitted Door or Window child.
+Doors support single/double leaves, inset and thickness. Windows include a
+pane, frame and clipped bars, with size-based Auto or manual horizontal/vertical
+counts. Circular Auto windows have no bars. All infills follow opening edits and
+component scaling, and appear beneath their opening in the tree.
+
+### Infill reuse and opening selection
+Infill sections now separate Fit & depth, Door leaves/Frame & bars, Materials,
+and Apply to other openings. Scene-wide copying offers all matching doors or
+windows, or similar-sized openings (both dimensions within 20%), shows target
+counts, replaces existing settings/materials and supports one-step Undo.
+Double doors expose the gap between leaves. Existing infills default to 0.01 m.
+Openings have a 10px border picking tolerance, hover outline and tooltip; only
+solid meshes block picking, not decorative edge lines.
+
+### Multiple openings
+Shift-click canvas openings or their tree entries to toggle a same-wall selection.
+Selected openings highlight together; centre dragging preserves their spacing.
+Duplicate selected openings copies shapes/infills into available wall space and
+selects the new IDs, ready to drag. Delete selected/keyboard delete removes the
+set. Duplicate/move/delete are individual undo steps. Different-wall multi-select
+and multi-resize are not included; numeric settings edit the active opening.

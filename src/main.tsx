@@ -1,3 +1,18 @@
+import { duplicateOpenings } from "./opening-groups";
+import {
+  copyInfill,
+  infillTargets,
+  defaultInfill,
+  type Infill,
+} from "./infills";
+import {
+  openingKinds,
+  openingName,
+  type Opening,
+  type OpeningKind,
+} from "./openings";
+import { bodyMaterial, materialMetadata } from "./materials";
+import type { MaterialDescription } from "./model";
 import { subdivisionDefaults } from "./subdivisions";
 import { type Primitive } from "./model";
 import { SceneLibrary } from "./SceneLibrary";
@@ -98,6 +113,69 @@ function Num({
     </label>
   );
 }
+function OpeningIcon({ kind }: { kind: OpeningKind }) {
+  return (
+    <svg
+      width="32"
+      height="36"
+      viewBox="0 0 32 36"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+    >
+      {kind === "circle-window" ? (
+        <circle cx="16" cy="18" r="11" />
+      ) : kind.startsWith("arched") ? (
+        <path d="M5 32V15a11 11 0 0 1 22 0v17Z" />
+      ) : (
+        <rect
+          x="5"
+          y={kind === "door" ? 3 : 8}
+          width="22"
+          height={kind === "door" ? 29 : 22}
+          rx="1"
+        />
+      )}
+      {kind.includes("window") && <path d="M16 8v20M6 18h20" />}
+    </svg>
+  );
+}
+function MaterialFields({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value?: MaterialDescription;
+  onChange: (m: MaterialDescription) => void;
+}) {
+  const m = value ?? { name: "", description: "" };
+  return (
+    <fieldset className="material-fields">
+      <legend>{label}</legend>
+      <label className="field">
+        Name
+        <input
+          aria-label={`${label} name`}
+          value={m.name}
+          maxLength={500}
+          placeholder="e.g. Weathered slate"
+          onChange={(e) => onChange({ ...m, name: e.target.value })}
+        />
+      </label>
+      <label className="field">
+        Description
+        <textarea
+          aria-label={`${label} description`}
+          value={m.description}
+          maxLength={19000}
+          placeholder="Describe appearance, finish and wear…"
+          onChange={(e) => onChange({ ...m, description: e.target.value })}
+        />
+      </label>
+    </fieldset>
+  );
+}
 function Floating({
   title,
   className = "",
@@ -171,6 +249,14 @@ function App() {
   const [d, setD] = useState<Plan>(initial),
     [selected, setSelected] = useState<string | null>(null),
     [tool, setTool] = useState<Tool>("select"),
+    [activeFace, setActiveFace] = useState<{
+      partId: string;
+      index: number;
+    } | null>(null),
+    [activeOpening, setActiveOpening] = useState<string | null>(null),
+    [openingSelection, setOpeningSelection] = useState<string[]>([]),
+    [openingKind, setOpeningKind] = useState<OpeningKind>("door"),
+    [openingMenu, setOpeningMenu] = useState(false),
     [addShape, setAddShape] = useState<Primitive>("cube"),
     [scaleFactor, setScaleFactor] = useState(1),
     [selectionMode, setSelectionMode] = useState<SelectionMode>("vertices"),
@@ -242,6 +328,11 @@ function App() {
           if (id) setSettingsTab("part");
         },
         commit,
+        face: setActiveFace,
+        opening: (id, ids) => {
+          setActiveOpening(id);
+          setOpeningSelection(ids ?? (id ? [id] : []));
+        },
         tool: (next) => {
           if (stage.current?.tool === "add" && next === "select")
             setSelectionMode("faces");
@@ -266,6 +357,11 @@ function App() {
       stage.current.showFloors = floorGuides;
       stage.current.showTerrain = terrainVisible;
       stage.current.xray = xray;
+      stage.current.activeFace =
+        activeFace?.partId === selected ? activeFace : null;
+      stage.current.selectedOpening = activeOpening;
+      stage.current.selectedOpenings = openingSelection;
+      stage.current.openingKind = openingKind;
       stage.current.update(d, selected, tool);
     }
     try {
@@ -285,6 +381,10 @@ function App() {
     terrainVisible,
     xray,
     selectionMode,
+    activeFace,
+    activeOpening,
+    openingSelection,
+    openingKind,
   ]);
   function undo() {
     const old = history.current.pop();
@@ -326,6 +426,7 @@ function App() {
       ...clone(p),
       id: uid(),
       name: p.name + " copy",
+      openings: p.openings?.map((o) => ({ ...o, id: uid() })),
       role: "extension" as const,
       x: p.x + p.width,
     };
@@ -354,12 +455,45 @@ function App() {
         e.shiftKey ? redo() : undo();
       } else if (e.key === "Delete" || e.key === "Backspace") {
         e.preventDefault();
-        remove();
+        const part = live.current.parts.find((p) => p.id === selected);
+        if (
+          activeOpening &&
+          part?.openings?.some((o) => o.id === activeOpening)
+        ) {
+          update({
+            openings: part.openings.filter(
+              (o) => !openingSelection.includes(o.id) && o.id !== activeOpening,
+            ),
+          });
+          setActiveOpening(null);
+        } else remove();
       } else if (e.key === "Escape") setTool("select");
     };
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
   });
+  useEffect(() => {
+    if (activeFace?.partId !== selected) {
+      setActiveFace(null);
+      setActiveOpening(null);
+      setOpeningMenu(false);
+      if (tool === "openings") setTool("select");
+    }
+  }, [selected, activeFace, tool]);
+  useEffect(() => {
+    if (!activeOpening) setOpeningSelection([]);
+  }, [activeOpening]);
+  useEffect(() => {
+    const ids = openingSelection.filter((id) =>
+      d.parts
+        .find((p) => p.id === selected)
+        ?.openings?.some((o) => o.id === id),
+    );
+    if (ids.length !== openingSelection.length) {
+      setOpeningSelection(ids);
+      setActiveOpening(ids.at(-1) ?? null);
+    }
+  }, [d, selected, openingSelection]);
   function camera(v: string) {
     setView(v);
     stage.current?.setView(v, true);
@@ -568,6 +702,13 @@ function App() {
             geometryAuthority: "plan JSON and all nine rendered views",
             rendering:
               "orthographic; common scale across five flat views and four isometric corners",
+            openings: exportPlan.parts.map((p) => ({
+              partId: p.id,
+              hollowWalls: p.hollowWalls ?? false,
+              wallThickness: p.wallThickness ?? 0.4,
+              openings: p.openings ?? [],
+            })),
+            materialAssignments: materialMetadata(exportPlan),
             terrain: exportPlan.terrain,
             terrainGeometryIncluded:
               includeTerrain && (d.terrainLayout ?? "none") !== "none",
@@ -815,11 +956,20 @@ function App() {
       >
         <Floating title="Scene components" className="left">
           <SceneTree
+            selectedOpening={activeOpening}
+            selectedOpenings={openingSelection}
+            selectOpening={(partId, id, face, shift) => {
+              stage.current?.chooseOpening(partId, id, face, shift);
+              setSettingsTab("part");
+              setTool("select");
+              setSelectionMode("faces");
+            }}
             plan={d}
             selected={selected}
             commit={commit}
             select={(id) => {
               setSelected(id);
+              setActiveOpening(null);
               setSettingsTab("part");
               setTool(id.includes(":") ? "move" : "select");
             }}
@@ -850,6 +1000,60 @@ function App() {
                 </button>
               ))}
             </div>
+            {activeFace?.partId === selected && activeFace && (
+              <div className="opening-picker">
+                <button
+                  className={tool === "openings" ? "chosen" : ""}
+                  aria-expanded={openingMenu}
+                  onClick={() => setOpeningMenu((v) => !v)}
+                >
+                  <ToolIcon name="openings" /> Openings ▾
+                </button>
+                {openingMenu && (
+                  <div
+                    className="opening-menu"
+                    role="group"
+                    aria-label="Opening shapes"
+                  >
+                    {openingKinds.map((kind) => (
+                      <button
+                        key={kind}
+                        onClick={() => {
+                          setOpeningKind(kind);
+                          setTool("openings");
+                          setOpeningMenu(false);
+                          setHint(
+                            `Draw ${openingName(kind).toLowerCase()} on highlighted wall`,
+                          );
+                        }}
+                      >
+                        <OpeningIcon kind={kind} />
+                        <span>{openingName(kind)}</span>
+                      </button>
+                    ))}
+                    <label className="settings-check opening-wall-toggle">
+                      <input
+                        type="checkbox"
+                        checked={p?.hollowWalls ?? false}
+                        onChange={(e) =>
+                          update({ hollowWalls: e.target.checked })
+                        }
+                      />{" "}
+                      Hollow walls (through-openings)
+                    </label>
+                    <p className="micro">
+                      Draw on highlighted wall {activeFace.index + 1}. Escape
+                      cancels.
+                    </p>
+                  </div>
+                )}
+                {tool === "openings" && (
+                  <span className="micro">
+                    {openingName(openingKind)} · drag on wall
+                  </span>
+                )}
+              </div>
+            )}
             {tool === "add" && (
               <div className="segmented add-controls">
                 <select
@@ -1184,6 +1388,377 @@ function App() {
                     </select>
                   </label>
                 </details>
+                {p.shape !== "circle" && (
+                  <details className="part-section" open={!!activeOpening}>
+                    <summary>
+                      Walls & openings ({p.openings?.length ?? 0})
+                    </summary>
+                    <label className="settings-check">
+                      <input
+                        type="checkbox"
+                        checked={p.hollowWalls ?? false}
+                        onChange={(e) =>
+                          update({ hollowWalls: e.target.checked })
+                        }
+                      />{" "}
+                      Hollow walls
+                    </label>
+                    <Num
+                      label="Wall thickness"
+                      value={p.wallThickness ?? 0.4}
+                      min={0.05}
+                      max={Math.min(5, Math.min(p.width, p.depth) / 2 - 0.05)}
+                      step={0.05}
+                      onChange={(wallThickness) => update({ wallThickness })}
+                    />
+                    <p className="micro">
+                      {p.hollowWalls
+                        ? "Through-openings with interior walls and a simple floor."
+                        : "Solid body: openings become shallow recesses. Enable Hollow walls for through-openings."}{" "}
+                      Select → Faces, click a wall, then use Openings to draw.
+                    </p>
+                    {(p.openings ?? []).map((o) => (
+                      <button
+                        className={
+                          activeOpening === o.id ? "wide chosen" : "wide"
+                        }
+                        key={o.id}
+                        onClick={() => {
+                          setActiveOpening(o.id);
+                          setOpeningSelection([o.id]);
+                          setActiveFace({ partId: p.id, index: o.face });
+                        }}
+                      >
+                        {o.name} · wall {o.face + 1}
+                      </button>
+                    ))}
+                    {(() => {
+                      const o = p.openings?.find((o) => o.id === activeOpening);
+                      if (!o) return null;
+                      const change = (patch: Partial<Opening>) =>
+                        update({
+                          openings: p.openings!.map((q) =>
+                            q.id === o.id ? { ...q, ...patch } : q,
+                          ),
+                        });
+                      const selectedIds = openingSelection.length
+                        ? openingSelection
+                        : [o.id];
+                      const changeInfill = (patch: Partial<Infill>) =>
+                        change({ infill: { ...o.infill!, ...patch } });
+                      return (
+                        <div className="opening-properties">
+                          <p className="muted">
+                            {selectedIds.length} opening
+                            {selectedIds.length === 1 ? "" : "s"} selected ·
+                            Shift-click openings on this wall to add/remove.
+                            Drag a selected centre to move together.
+                          </p>
+                          <button
+                            className="wide"
+                            onClick={() => {
+                              try {
+                                const result = duplicateOpenings(
+                                  d,
+                                  p.id,
+                                  selectedIds,
+                                );
+                                commit(result.plan);
+                                setOpeningSelection(result.ids);
+                                setActiveOpening(result.ids.at(-1)!);
+                                setTool("select");
+                                setHint(
+                                  "Copies selected · drag a centre handle to move together",
+                                );
+                              } catch (error) {
+                                setMessage(String(error));
+                              }
+                            }}
+                          >
+                            Duplicate selected openings ({selectedIds.length})
+                          </button>
+                          <label className="field">
+                            Opening name
+                            <input
+                              aria-label="Opening name"
+                              value={o.name}
+                              onChange={(e) => change({ name: e.target.value })}
+                            />
+                          </label>
+                          <div className="pair">
+                            <Num
+                              label="Opening width"
+                              value={o.width}
+                              min={0.1}
+                              max={500}
+                              step={step}
+                              onChange={(width) =>
+                                change({
+                                  width,
+                                  ...(o.kind === "circle-window"
+                                    ? { height: width }
+                                    : {}),
+                                })
+                              }
+                            />
+                            <Num
+                              label="Opening height"
+                              value={o.height}
+                              min={0.1}
+                              max={500}
+                              step={step}
+                              onChange={(height) =>
+                                change({
+                                  height,
+                                  ...(o.kind === "circle-window"
+                                    ? { width: height }
+                                    : {}),
+                                })
+                              }
+                            />
+                          </div>
+                          <Num
+                            label="Offset from wall start"
+                            value={o.x}
+                            min={0.05}
+                            max={500}
+                            step={step}
+                            onChange={(x) => change({ x })}
+                          />
+                          <Num
+                            label="Sill / base height"
+                            value={o.y}
+                            min={0}
+                            max={500}
+                            step={step}
+                            onChange={(y) => change({ y })}
+                          />
+                          <details className="part-section" open>
+                            <summary>Infill</summary>
+                            <label className="field">
+                              Fill opening
+                              <select
+                                aria-label="Opening infill"
+                                value={o.infill?.type ?? "empty"}
+                                onChange={(e) =>
+                                  change({
+                                    infill:
+                                      e.target.value === "empty"
+                                        ? undefined
+                                        : defaultInfill(
+                                            e.target.value as Infill["type"],
+                                          ),
+                                  })
+                                }
+                              >
+                                <option value="empty">Empty</option>
+                                <option value="door">Door</option>
+                                <option value="window">Window</option>
+                              </select>
+                            </label>
+                            {o.infill && (
+                              <>
+                                <details className="part-section">
+                                  <summary>Fit & depth</summary>
+                                  <div className="pair">
+                                    <Num
+                                      label="Inset depth"
+                                      value={o.infill.inset}
+                                      min={0}
+                                      max={5}
+                                      step={0.01}
+                                      onChange={(inset) =>
+                                        changeInfill({ inset })
+                                      }
+                                    />
+                                    <Num
+                                      label="Panel thickness"
+                                      value={o.infill.thickness}
+                                      min={0.005}
+                                      max={1}
+                                      step={0.01}
+                                      onChange={(thickness) =>
+                                        changeInfill({ thickness })
+                                      }
+                                    />
+                                  </div>
+                                  {!p.hollowWalls && (
+                                    <p className="muted">
+                                      Enable hollow walls for a clear view
+                                      through windows. Solid parts retain a
+                                      recess backing.
+                                    </p>
+                                  )}
+                                </details>
+                                <details className="part-section" open>
+                                  <summary>
+                                    {o.infill.type === "door"
+                                      ? "Door leaves"
+                                      : "Frame & bars"}
+                                  </summary>
+                                  {o.infill.type === "door" ? (
+                                    <>
+                                      <label className="settings-check">
+                                        <input
+                                          type="checkbox"
+                                          checked={o.infill.doubleDoor}
+                                          onChange={(e) =>
+                                            changeInfill({
+                                              doubleDoor: e.target.checked,
+                                            })
+                                          }
+                                        />{" "}
+                                        Double door
+                                      </label>
+                                      {o.infill.doubleDoor && (
+                                        <Num
+                                          label="Gap between leaves"
+                                          value={o.infill.gapWidth ?? 0.01}
+                                          min={0}
+                                          max={5}
+                                          step={0.005}
+                                          onChange={(gapWidth) =>
+                                            changeInfill({ gapWidth })
+                                          }
+                                        />
+                                      )}
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Num
+                                        label="Frame / bar width"
+                                        value={o.infill.frameWidth}
+                                        min={0.005}
+                                        max={1}
+                                        step={0.01}
+                                        onChange={(frameWidth) =>
+                                          changeInfill({ frameWidth })
+                                        }
+                                      />
+                                      <label className="field">
+                                        Window bars
+                                        <select
+                                          value={o.infill.bars}
+                                          onChange={(e) =>
+                                            changeInfill({
+                                              bars: e.target.value as
+                                                "auto" | "manual",
+                                            })
+                                          }
+                                        >
+                                          <option value="auto">Auto</option>
+                                          <option value="manual">Manual</option>
+                                        </select>
+                                      </label>
+                                      {o.infill.bars === "manual" && (
+                                        <div className="pair">
+                                          <Num
+                                            label="Horizontal bars"
+                                            value={o.infill.horizontal}
+                                            min={0}
+                                            max={12}
+                                            step={1}
+                                            onChange={(horizontal) =>
+                                              changeInfill({ horizontal })
+                                            }
+                                          />
+                                          <Num
+                                            label="Vertical bars"
+                                            value={o.infill.vertical}
+                                            min={0}
+                                            max={12}
+                                            step={1}
+                                            onChange={(vertical) =>
+                                              changeInfill({ vertical })
+                                            }
+                                          />
+                                        </div>
+                                      )}
+                                    </>
+                                  )}
+                                </details>
+                                <details className="part-section">
+                                  <summary>Materials</summary>
+                                  {(o.infill.type === "door"
+                                    ? ["doorMaterial"]
+                                    : ["frameMaterial", "glassMaterial"]
+                                  ).map((key) => (
+                                    <label className="field" key={key}>
+                                      {key === "doorMaterial"
+                                        ? "Door material"
+                                        : key === "frameMaterial"
+                                          ? "Frame material"
+                                          : "Glass material"}
+                                      <textarea
+                                        value={o.infill![key as "doorMaterial"]}
+                                        onChange={(e) =>
+                                          changeInfill({
+                                            [key]: e.target.value,
+                                          })
+                                        }
+                                      />
+                                    </label>
+                                  ))}
+                                </details>
+                                <details className="part-section">
+                                  <summary>Apply to other openings</summary>
+                                  <p className="muted">
+                                    Copies infill settings and materials across
+                                    this scene, replacing existing infills.
+                                    Similar size means width and height within
+                                    20%. Undo reverses the whole change.
+                                  </p>
+                                  {[false, true].map((similar) => {
+                                    const count = infillTargets(
+                                      d,
+                                      o,
+                                      similar,
+                                    ).length;
+                                    return (
+                                      <button
+                                        key={String(similar)}
+                                        className="wide"
+                                        disabled={!count}
+                                        onClick={() => {
+                                          commit(copyInfill(d, o, similar));
+                                          setHint(
+                                            "Infill applied to " +
+                                              count +
+                                              " other openings",
+                                          );
+                                        }}
+                                      >
+                                        All{" "}
+                                        {o.infill!.type === "door"
+                                          ? "doors"
+                                          : "windows"}
+                                        {similar ? " (similar size)" : ""} ·{" "}
+                                        {count}
+                                      </button>
+                                    );
+                                  })}
+                                </details>
+                              </>
+                            )}
+                          </details>
+                          <button
+                            className="danger wide"
+                            onClick={() => {
+                              update({
+                                openings: p.openings!.filter(
+                                  (q) => !selectedIds.includes(q.id),
+                                ),
+                              });
+                              setActiveOpening(null);
+                            }}
+                          >
+                            Delete selected openings ({selectedIds.length})
+                          </button>
+                        </div>
+                      );
+                    })()}
+                  </details>
+                )}
                 <details className="part-section" open>
                   <summary>Dimensions</summary>
                   <div className="pair">
@@ -1617,14 +2192,27 @@ function App() {
                 </details>
                 <details className="part-section">
                   <summary>Materials</summary>
-                  <label className="field">
-                    Materials
-                    <textarea
-                      aria-label="Materials"
-                      value={p.materials}
-                      onChange={(e) => update({ materials: e.target.value })}
+                  <MaterialFields
+                    label="Body material"
+                    value={bodyMaterial(p)}
+                    onChange={(bodyMaterial) => update({ bodyMaterial })}
+                  />
+                  {p.roofEnabled !== false ? (
+                    <MaterialFields
+                      label="Roof material"
+                      value={p.roofMaterial}
+                      onChange={(roofMaterial) => update({ roofMaterial })}
                     />
-                  </label>
+                  ) : (
+                    <p className="micro">
+                      Enable the roof to edit its material. Any previous roof
+                      description is retained.
+                    </p>
+                  )}
+                  <p className="micro">
+                    Descriptions are exported as material metadata. They do not
+                    change viewport colours or generate textures.
+                  </p>
                 </details>
               </>
             ) : (
@@ -1856,6 +2444,11 @@ function App() {
                 patches join; children never receive extra terrain. Use Terrain
                 above the canvas to show or hide it.
               </p>
+              <MaterialFields
+                label="Terrain material"
+                value={sceneDraft.terrainMaterial}
+                onChange={(terrainMaterial) => draftPatch({ terrainMaterial })}
+              />
               <label className="field">
                 Scene notes
                 <textarea
