@@ -1,8 +1,14 @@
+import {
+  validateDetails,
+  scaleDetails,
+  type ArchitecturalDetails,
+} from "./architectural-details";
 import { validateOpenings, scaleOpenings, type Opening } from "./openings";
 import { bodyMaterial, materialText } from "./materials";
 export type MaterialDescription = { name: string; description: string };
 export type Roof = "gable" | "lean-to" | "flat";
 export type Part = {
+  architecturalDetails?: ArchitecturalDetails;
   id: string;
   name: string;
   role: "main" | "extension";
@@ -124,6 +130,7 @@ export function resizeModule(d: Plan, size: number, rescale: boolean): Plan {
   if (rescale) {
     const r = size / n.moduleSize;
     for (const p of n.parts) {
+      scaleDetails(p.architecturalDetails, r);
       scaleOpenings(p, r);
       if (p.wallHeight !== undefined) p.wallHeight *= r;
       if (p.topDiameter !== undefined) p.topDiameter *= r;
@@ -306,6 +313,7 @@ export function validate(raw: unknown): Plan {
       !["front", "back", "left", "right"].includes(p.highEdge)
     )
       throw Error("A building part has invalid dimensions or settings.");
+    validateDetails(p.architecturalDetails);
     validateOpenings(p);
     ids.add(p.id);
   }
@@ -332,7 +340,7 @@ export function brief(d: Plan): string {
     )
     .join(
       "\n",
-    )}\nGroups: ${JSON.stringify(d.groups ?? [])}. Part memberships: ${JSON.stringify(d.parts.map((p) => ({ part: p.id, group: p.groupId ?? null })))}\n\n## Locked parts\n\n${d.parts.map((p) => `- ${p.name} (${p.role}, ID ${p.id}): shape ${p.shape ?? "rectangle"}; base elevation ${p.baseY ?? 0} m; centre X ${p.x}, Z ${p.z}; width ${p.width} × depth ${p.depth} m; ${p.shape === "circle" ? `cylinder ${p.innerDiameter !== undefined ? `with open bore bottom diameter ${p.innerDiameter} m, top diameter ${p.topInnerDiameter ?? p.innerDiameter} m; ` : ""}bottom diameter ${p.width} m, top diameter ${p.topDiameter ?? p.width} m;` : ""} local rotation ${p.rotation}°; ${Number(estimatedFloors(p).toFixed(2))} estimated floors (floor height ${p.floorHeight} m); explicit eaves height ${height(p)} m; roof ${p.roofEnabled === false ? "disabled (plain capped volume)" : p.roof}, rise ${p.roofEnabled === false || p.roof === "flat" ? 0 : p.rise} m, ridge along local ${p.ridge}, lean-to high edge ${p.highEdge}. Ridge endpoints (normalised local X, metres above eaves, normalised local Z): ${JSON.stringify(ridgeEnds(p))}. Corner wall heights: ${JSON.stringify(p.cornerHeights ?? [])}; corner base heights: ${JSON.stringify(p.cornerBases ?? [])}. Footprint normalised local X/Z corners: ${JSON.stringify(footprint(p))}. Wall construction: ${p.hollowWalls ? `hollow, thickness ${p.wallThickness ?? 0.4} m` : "solid, openings are recesses"}. Openings (wall index, metre offsets and sizes): ${JSON.stringify(p.openings ?? [])}. Body material: ${materialText(bodyMaterial(p))}. Roof material: ${p.roofEnabled === false ? "not included (roof disabled)" : materialText(p.roofMaterial)}.`).join("\n")}\n\n## Artistic guidance\n\n${d.notes || "Follow the approved project art direction."}\n\n## Unspecified details\n\nDoors, windows, surface wear and dressing may be unspecified. Circular parts can represent chimneys; preserve every modelled part. Infer them conservatively without changing the locked structural volumes. No new extensions. Roof intersections are unmerged blockout geometry, not construction drawings.\n\n## Review warnings\n\n${
+    )}\nGroups: ${JSON.stringify(d.groups ?? [])}. Part memberships: ${JSON.stringify(d.parts.map((p) => ({ part: p.id, group: p.groupId ?? null })))}\n\n## Locked parts\n\n${d.parts.map((p) => `- ${p.name} (${p.role}, ID ${p.id}): shape ${p.shape ?? "rectangle"}; base elevation ${p.baseY ?? 0} m; centre X ${p.x}, Z ${p.z}; width ${p.width} × depth ${p.depth} m; ${p.shape === "circle" ? `cylinder ${p.innerDiameter !== undefined ? `with open bore bottom diameter ${p.innerDiameter} m, top diameter ${p.topInnerDiameter ?? p.innerDiameter} m; ` : ""}bottom diameter ${p.width} m, top diameter ${p.topDiameter ?? p.width} m;` : ""} local rotation ${p.rotation}°; ${Number(estimatedFloors(p).toFixed(2))} estimated floors (floor height ${p.floorHeight} m); explicit eaves height ${height(p)} m; roof ${p.roofEnabled === false ? "disabled (plain capped volume)" : p.roof}, rise ${p.roofEnabled === false || p.roof === "flat" ? 0 : p.rise} m, ridge along local ${p.ridge}, lean-to high edge ${p.highEdge}. Ridge endpoints (normalised local X, metres above eaves, normalised local Z): ${JSON.stringify(ridgeEnds(p))}. Corner wall heights: ${JSON.stringify(p.cornerHeights ?? [])}; corner base heights: ${JSON.stringify(p.cornerBases ?? [])}. Footprint normalised local X/Z corners: ${JSON.stringify(footprint(p))}. Wall construction: ${p.hollowWalls ? `hollow, thickness ${p.wallThickness ?? 0.4} m` : "solid, openings are recesses"}. Openings (wall index, metre offsets and sizes): ${JSON.stringify(p.openings ?? [])}. Architectural details: ${JSON.stringify(p.architecturalDetails ?? null)}. Body material: ${materialText(bodyMaterial(p))}. Roof material: ${p.roofEnabled === false ? "not included (roof disabled)" : materialText(p.roofMaterial)}.`).join("\n")}\n\n## Artistic guidance\n\n${d.notes || "Follow the approved project art direction."}\n\n## Unspecified details\n\nDoors, windows, surface wear and dressing may be unspecified. Circular parts can represent chimneys; preserve every modelled part. Infer them conservatively without changing the locked structural volumes. No new extensions. Roof intersections are unmerged blockout geometry, not construction drawings.\n\n## Review warnings\n\n${
     warnings(d)
       .map((x) => "- " + x)
       .join("\n") || "No structural warnings."
@@ -500,6 +508,7 @@ export function scalePart(source: Part, factor: number): Part {
   if (!Number.isFinite(factor) || factor <= 0)
     throw new Error("Scale must be greater than zero.");
   const p = clone(source);
+  scaleDetails(p.architecturalDetails, factor);
   scaleOpenings(p, factor);
   for (const key of ["width", "depth", "floorHeight", "rise"] as const)
     p[key] *= factor;

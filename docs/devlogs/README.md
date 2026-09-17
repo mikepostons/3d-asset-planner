@@ -17,3 +17,6 @@ Use `YYYY-MM-DD-short-description.md`. Log meaningful delivered changes and actu
 - [2026-09-17 — Door and window infills](2026-09-17-opening-infills.md)
 - [2026-09-17 — Infill reuse and easier selection](2026-09-17-infill-reuse.md)
 - [2026-09-17 — Opening multi-selection and duplication](2026-09-17-opening-multiselect.md)
+- [2026-09-17 — Architectural details](2026-09-17-architectural-details.md)
+- [2026-09-18 — Arches and keystones](2026-09-18-arches.md)
+- [2026-09-18 — Continuous corner quoins](2026-09-18-quoins.md)

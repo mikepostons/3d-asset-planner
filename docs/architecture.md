@@ -103,3 +103,25 @@ positions from one snapped delta and validate the entire candidate plan.
 opening-groups.ts duplicates with fresh IDs, deep-copied infills and a shared
 translation, searching candidate positions before committing. No overlapping
 temporary copies enter persisted state; undo/deletion prunes stale selected IDs.
+
+architectural-details.ts creates derived chamfered stone meshes in wall-local
+coordinates. Seed+opening ID+course index makes jamb variation stable; quoins use
+corner/course indices and alternate widths along adjacent faces. Width variation
+extends outwards from opening clearance. Quoin blocks overlapping cut clearance
+are omitted. Geometry is blockout dressing, not a merged watertight masonry mesh.
+ArchitecturalControls is shared by component defaults and opening overrides.
+Threshold reconciliation runs before document commit validation; failures retain
+the previous document. Render meshes are children of the component in solids,
+participating in reference rendering and X-ray mode.
+
+Arch generation matches the opening's 16-segment half-ellipse or 32-segment circle.
+Inner stone boundaries interpolate the original faceted contour, preserving cut
+clearance. Mortar gaps trim sector ends; front bevel rings provide chamfers.
+Keystones combine the two crown sectors, increasing radial thickness and projection.
+These are derived meshes with the same persistence/material flow as other details.
+
+Quoin blocks use the intersection of the two outward-offset wall planes and
+extend along both adjoining wall directions. One mesh wraps each corner/course;
+alternating long and half-length sides produce the rotated bond. Seed variation
+is shared across both faces of each stone. Opening clearance suppresses the whole
+block when either side conflicts.

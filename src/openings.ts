@@ -1,9 +1,18 @@
+import {
+  openingDetails,
+  validateDetails,
+  scaleDetails,
+  type ArchitecturalDetails,
+} from "./architectural-details";
 import type { Infill } from "./infills";
 import * as T from "three";
 import type { Part } from "./model";
 export type OpeningKind =
   "door" | "window" | "arched-door" | "arched-window" | "circle-window";
 export type Opening = {
+  detailsMode?: "inherit" | "off" | "custom";
+  architecturalDetails?: ArchitecturalDetails;
+  thresholdLift?: number;
   infill?: Infill;
   id: string;
   name: string;
@@ -182,6 +191,27 @@ export function validateOpenings(p: Part) {
       )
         throw Error("Invalid opening infill settings.");
     }
+    validateDetails(o.architecturalDetails);
+    const surround = openingDetails(p, o);
+    if (
+      surround?.enabled &&
+      surround.cills &&
+      o.kind !== "circle-window" &&
+      o.width + (surround.cillWidthAdjustment ?? 2 * surround.overhang) < 0.01
+    )
+      throw Error(
+        "Cill width must remain at least 0.01 m. Reduce the negative width adjustment.",
+      );
+    if (
+      o.detailsMode !== undefined &&
+      !["inherit", "off", "custom"].includes(o.detailsMode)
+    )
+      throw Error("Invalid opening detail mode.");
+    if (
+      o.thresholdLift !== undefined &&
+      (!Number.isFinite(o.thresholdLift) || o.thresholdLift < 0)
+    )
+      throw Error("Invalid threshold lift.");
     ids.add(o.id);
     const f = wallFrame(p, o.face),
       bottom = (x: number) => T.MathUtils.lerp(f.baseA, f.baseB, x / f.length),
@@ -210,6 +240,10 @@ export function validateOpenings(p: Part) {
   }
 }
 export function scaleOpenings(p: Part, factor: number) {
+  for (const o of p.openings ?? []) {
+    scaleDetails(o.architecturalDetails, factor);
+    if (o.thresholdLift !== undefined) o.thresholdLift *= factor;
+  }
   for (const o of p.openings ?? [])
     if (o.infill)
       o.infill = {

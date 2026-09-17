@@ -1,3 +1,5 @@
+import { ArchitecturalControls } from "./ArchitecturalControls";
+import { reconcileThresholds, defaultDetails } from "./architectural-details";
 import { duplicateOpenings } from "./opening-groups";
 import {
   copyInfill,
@@ -307,6 +309,7 @@ function App() {
   live.current = d;
   const commit = useCallback((next: Plan) => {
     try {
+      next = { ...next, parts: next.parts.map(reconcileThresholds) };
       validate(next);
     } catch (e) {
       setMessage(String(e));
@@ -707,6 +710,7 @@ function App() {
               hollowWalls: p.hollowWalls ?? false,
               wallThickness: p.wallThickness ?? 0.4,
               openings: p.openings ?? [],
+              architecturalDetails: p.architecturalDetails ?? null,
             })),
             materialAssignments: materialMetadata(exportPlan),
             terrain: exportPlan.terrain,
@@ -1533,6 +1537,66 @@ function App() {
                             step={step}
                             onChange={(y) => change({ y })}
                           />
+                          <details className="part-section">
+                            <summary>Opening surrounds</summary>
+                            <label className="field">
+                              Detail settings
+                              <select
+                                value={o.detailsMode ?? "inherit"}
+                                onChange={(e) => {
+                                  const mode = e.target.value as
+                                    "inherit" | "off" | "custom";
+                                  update(
+                                    reconcileThresholds({
+                                      ...p,
+                                      openings: p.openings!.map((q) =>
+                                        q.id === o.id
+                                          ? {
+                                              ...q,
+                                              detailsMode: mode,
+                                              architecturalDetails:
+                                                mode === "custom"
+                                                  ? (q.architecturalDetails ??
+                                                    structuredClone(
+                                                      p.architecturalDetails ??
+                                                        defaultDetails(),
+                                                    ))
+                                                  : q.architecturalDetails,
+                                            }
+                                          : q,
+                                      ),
+                                    }),
+                                  );
+                                }}
+                              >
+                                <option value="inherit">
+                                  Use component settings
+                                </option>
+                                <option value="off">
+                                  Disabled for this opening
+                                </option>
+                                <option value="custom">Custom settings</option>
+                              </select>
+                            </label>
+                            {o.detailsMode === "custom" && (
+                              <ArchitecturalControls
+                                opening
+                                value={o.architecturalDetails}
+                                onChange={(architecturalDetails) =>
+                                  update(
+                                    reconcileThresholds({
+                                      ...p,
+                                      openings: p.openings!.map((q) =>
+                                        q.id === o.id
+                                          ? { ...q, architecturalDetails }
+                                          : q,
+                                      ),
+                                    }),
+                                  )
+                                }
+                              />
+                            )}
+                          </details>
                           <details className="part-section" open>
                             <summary>Infill</summary>
                             <label className="field">
@@ -1757,6 +1821,19 @@ function App() {
                         </div>
                       );
                     })()}
+                  </details>
+                )}
+                {p.shape !== "circle" && (
+                  <details className="part-section">
+                    <summary>Architectural details</summary>
+                    <ArchitecturalControls
+                      value={p.architecturalDetails}
+                      onChange={(architecturalDetails) =>
+                        update(
+                          reconcileThresholds({ ...p, architecturalDetails }),
+                        )
+                      }
+                    />
                   </details>
                 )}
                 <details className="part-section" open>

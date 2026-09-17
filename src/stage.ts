@@ -1,3 +1,4 @@
+import { architecturalGeometry } from "./architectural-details";
 import { infillGeometry } from "./infills";
 import {
   editOpening,
@@ -294,6 +295,26 @@ export class Stage {
       wall.userData.wall = true;
       wall.userData.part = p.id;
       group.add(wall);
+      for (const item of architecturalGeometry(p)) {
+        const mesh = new T.Mesh(
+          item.geometry,
+          new T.MeshStandardMaterial({
+            color: 0xb7b5a7,
+            roughness: 1,
+            side: T.DoubleSide,
+            transparent: this.xray,
+            opacity: this.xray ? 0.22 : 1,
+            depthWrite: !this.xray,
+          }),
+        );
+        mesh.name = item.name;
+        mesh.userData = {
+          part: p.id,
+          architecturalDetail: true,
+          materialDescription: item.material,
+        };
+        group.add(mesh);
+      }
       for (const o of p.openings ?? [])
         for (const item of infillGeometry(p, o)) {
           const mesh = new T.Mesh(

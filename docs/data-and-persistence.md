@@ -82,3 +82,21 @@ Geometry caps the effective gap at 80% of opening width so narrow targets retain
 door leaves. Bulk infill application copies settings independently without changing
 target shape, position or dimensions. Similar-size matching checks both width and
 height against the source within 20%; matching category follows opening kind.
+
+Part.architecturalDetails and optional Opening.architecturalDetails contain the
+feature flags, shared finish dimensions, widths/heights, seed and three material
+descriptions. Opening.detailsMode is inherit/off/custom; absent means inherit.
+Opening.thresholdLift records the last applied door lift. reconcileThresholds
+adjusts y by new minus old lift on commit, so toggles are reversible and positions
+remain standard wall coordinates. Physical sizes and thresholdLift scale with
+components. Existing plans with no settings generate no details.
+The plan, reference manifest and prompt brief include architectural detail settings.
+
+ArchitecturalDetails.cillWidthAdjustment is an optional signed total-width delta
+in metres; cills stay centred. Absent values use 2 × overhang for compatibility.
+cillProjection optionally overrides shared projection. Both scale with the part.
+
+ArchitecturalDetails optionally stores arches (default true), keystones (default
+false), archWidth (fallback jambWidth) and keystoneExtra (fallback 0.08 m).
+Explicit dimensions scale with the component. Existing enabled detail settings
+therefore gain arch surrounds unless disabled.

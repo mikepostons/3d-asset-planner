@@ -105,3 +105,28 @@ Duplicate selected openings copies shapes/infills into available wall space and
 selects the new IDs, ready to drag. Delete selected/keyboard delete removes the
 set. Duplicate/move/delete are individual undo steps. Different-wall multi-select
 and multi-resize are not included; numeric settings edit the active opening.
+
+### Architectural details (first increment)
+Component Settings → Architectural details generates straight-opening jambs,
+lintels, cills/door thresholds and optional corner quoins. Shared projection,
+chamfer, mortar gap, seeded width variation and dimensional controls drive the
+meshes. Surround/cill/quoin material descriptions accompany exports. Opening
+surrounds can inherit, disable or override component settings.
+Door thresholds optionally raise the cut and infill while preserving clear height;
+disabling/changing the threshold reverses the prior lift without accumulating it.
+Arched openings receive straight jambs up to the spring; shaped arch heads,
+circular surrounds and keystones are deferred. Close-set trims can overlap.
+
+Cills/thresholds have independent total width adjustment (positive or negative)
+and outward projection controls in Sizes, including per-opening custom settings.
+
+### Arches and keystones
+The earlier arch-head deferral is now resolved: arched doors/windows have
+segmented stone heads and circular windows have complete surrounds. Arches and
+Keystones toggles live in Architectural details, with surround width and keystone
+extra size in Sizes. Per-opening overrides apply. Shared projection, mortar gap,
+chamfer and surround materials are used. A keystone replaces the two crown sectors.
+
+Quoins now form one continuous corner block per course, with long/short dimensions
+swapped on successive courses. This replaces separate wall strips and fills the
+previous indentation at the projecting outside corner.
