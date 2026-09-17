@@ -1,3 +1,5 @@
+import { subdivisionDefaults } from "./subdivisions";
+import { type Primitive } from "./model";
 import { SceneLibrary } from "./SceneLibrary";
 import { libraryRequest, type Project, type SavedScene } from "./library";
 import { ToolIcon } from "./ToolIcon";
@@ -169,12 +171,14 @@ function App() {
   const [d, setD] = useState<Plan>(initial),
     [selected, setSelected] = useState<string | null>(null),
     [tool, setTool] = useState<Tool>("select"),
+    [addShape, setAddShape] = useState<Primitive>("cube"),
     [scaleFactor, setScaleFactor] = useState(1),
     [selectionMode, setSelectionMode] = useState<SelectionMode>("vertices"),
     [view, setView] = useState("main"),
     [drawShape, setDrawShape] = useState<"rectangle" | "circle">("rectangle"),
     [floorGuides, setFloorGuides] = useState(true),
     [terrainVisible, setTerrainVisible] = useState(true),
+    [xray, setXray] = useState(false),
     [exportDialog, setExportDialog] = useState(false),
     [includeTerrain, setIncludeTerrain] = useState(true),
     [hint, setHint] = useState("Ready"),
@@ -238,7 +242,11 @@ function App() {
           if (id) setSettingsTab("part");
         },
         commit,
-        tool: setTool,
+        tool: (next) => {
+          if (stage.current?.tool === "add" && next === "select")
+            setSelectionMode("faces");
+          setTool(next);
+        },
         hint: setHint,
       });
     } catch (e) {
@@ -254,8 +262,10 @@ function App() {
       if (stage.current.selectionMode !== selectionMode) stage.current.cancel();
       stage.current.selectionMode = selectionMode;
       stage.current.drawShape = drawShape;
+      stage.current.addShape = addShape;
       stage.current.showFloors = floorGuides;
       stage.current.showTerrain = terrainVisible;
+      stage.current.xray = xray;
       stage.current.update(d, selected, tool);
     }
     try {
@@ -270,8 +280,10 @@ function App() {
     selected,
     tool,
     drawShape,
+    addShape,
     floorGuides,
     terrainVisible,
+    xray,
     selectionMode,
   ]);
   function undo() {
@@ -596,7 +608,9 @@ function App() {
     p?.name ?? selectedGroup?.name ?? selectedStructure?.name ?? d.name;
   const selectionType = p
     ? p.shape === "circle"
-      ? "CYLINDER PART"
+      ? p.innerDiameter !== undefined
+        ? "HOLLOW CYLINDER PART"
+        : "CYLINDER PART"
       : "PART"
     : selectedGroup
       ? "GROUP"
@@ -728,6 +742,23 @@ function App() {
           </button>
         </div>
         <nav>
+          <div className="undo">
+            <button
+              aria-label="Undo"
+              disabled={!history.current.length}
+              onClick={undo}
+            >
+              <ToolIcon name="undo" />
+            </button>
+            <button
+              aria-label="Redo"
+              disabled={!future.current.length}
+              onClick={redo}
+            >
+              <ToolIcon name="redo" />
+            </button>
+          </div>
+
           <button
             aria-label="Settings"
             onClick={() => {
@@ -797,28 +828,42 @@ function App() {
         <main>
           <div className="canvas-toolbar">
             <div className="segmented">
-              {(["select", "draw", "move", "rotate", "scale"] as Tool[]).map(
-                (t) => (
-                  <button
-                    key={t}
-                    disabled={!!selected?.includes(":") && t === "rotate"}
-                    title={
-                      selected?.includes(":") && t === "rotate"
-                        ? "Select an individual part for this tool"
-                        : undefined
-                    }
-                    className={tool === t ? "chosen" : ""}
-                    onClick={() => {
-                      setTool(t);
-                      if (t === "draw") camera("top");
-                    }}
-                  >
-                    <ToolIcon name={t} />
-                    <span>{t[0].toUpperCase() + t.slice(1)}</span>
-                  </button>
-                ),
-              )}
+              {(
+                ["select", "draw", "add", "move", "rotate", "scale"] as Tool[]
+              ).map((t) => (
+                <button
+                  key={t}
+                  disabled={!!selected?.includes(":") && t === "rotate"}
+                  title={
+                    selected?.includes(":") && t === "rotate"
+                      ? "Select an individual part for this tool"
+                      : undefined
+                  }
+                  className={tool === t ? "chosen" : ""}
+                  onClick={() => {
+                    setTool(t);
+                    if (t === "draw") camera("top");
+                  }}
+                >
+                  <ToolIcon name={t} />
+                  <span>{t[0].toUpperCase() + t.slice(1)}</span>
+                </button>
+              ))}
             </div>
+            {tool === "add" && (
+              <div className="segmented add-controls">
+                <select
+                  aria-label="Shape to add"
+                  value={addShape}
+                  onChange={(e) => setAddShape(e.target.value as Primitive)}
+                >
+                  <option value="cube">Cube</option>
+                  <option value="cylinder">Cylinder</option>
+                  <option value="donut">Donut (hollow cylinder)</option>
+                </select>
+                <span className="micro">Click to place · Esc cancels</span>
+              </div>
+            )}
             {tool === "scale" && (
               <div
                 className="scale-controls"
@@ -908,84 +953,78 @@ function App() {
                 </button>
               </div>
             )}
-            <div className="undo">
-              <button
-                aria-label="Undo"
-                disabled={!history.current.length}
-                onClick={undo}
-              >
-                <ToolIcon name="undo" />
-              </button>
-              <button
-                aria-label="Redo"
-                disabled={!future.current.length}
-                onClick={redo}
-              >
-                <ToolIcon name="redo" />
-              </button>
-            </div>
-            <div className="guides">
-              <button
-                aria-pressed={floorGuides}
-                className={floorGuides ? "chosen" : ""}
-                onClick={() => setFloorGuides(!floorGuides)}
-              >
-                Floor guides
-              </button>
-              <button
-                aria-pressed={
-                  terrainVisible && (d.terrainLayout ?? "none") !== "none"
-                }
-                disabled={(d.terrainLayout ?? "none") === "none"}
-                className={
-                  terrainVisible &&
-                  d.terrainLayout &&
-                  d.terrainLayout !== "none"
-                    ? "chosen"
-                    : ""
-                }
-                onClick={() => setTerrainVisible((v) => !v)}
-              >
-                Terrain
-              </button>
-            </div>
-            <div className="views">
-              <div className="segmented" aria-label="View dimension">
+            <div className="view-tools">
+              <div className="guides">
                 <button
-                  aria-pressed={flatView(view)}
-                  className={flatView(view) ? "chosen" : ""}
-                  onClick={() => camera("top")}
+                  aria-pressed={floorGuides}
+                  className={floorGuides ? "chosen" : ""}
+                  onClick={() => setFloorGuides(!floorGuides)}
                 >
-                  2D
+                  Floor guides
                 </button>
                 <button
-                  aria-pressed={!flatView(view)}
-                  className={!flatView(view) ? "chosen" : ""}
-                  onClick={() => camera("main")}
+                  aria-pressed={
+                    terrainVisible && (d.terrainLayout ?? "none") !== "none"
+                  }
+                  disabled={(d.terrainLayout ?? "none") === "none"}
+                  className={
+                    terrainVisible &&
+                    d.terrainLayout &&
+                    d.terrainLayout !== "none"
+                      ? "chosen"
+                      : ""
+                  }
+                  onClick={() => setTerrainVisible((v) => !v)}
                 >
-                  3D
+                  Terrain
+                </button>
+                <button
+                  aria-pressed={xray}
+                  className={xray ? "chosen" : ""}
+                  onClick={() => setXray((v) => !v)}
+                  title="See through components; reference exports stay solid"
+                >
+                  X-ray
                 </button>
               </div>
-              <select
-                aria-label="Camera view"
-                value={view}
-                onChange={(e) => camera(e.target.value)}
-              >
-                {flatView(view) ? (
-                  ["top", "front", "back", "left", "right"].map((v) => (
-                    <option key={v} value={v}>
-                      {v[0].toUpperCase() + v.slice(1)}
-                    </option>
-                  ))
-                ) : (
-                  <>
-                    <option value="main">Front right</option>
-                    <option value="reverse">Back left</option>
-                    <option value="iso-front-left">Front left</option>
-                    <option value="iso-back-right">Back right</option>
-                  </>
-                )}
-              </select>
+              <div className="views">
+                <div className="segmented" aria-label="View dimension">
+                  <button
+                    aria-pressed={flatView(view)}
+                    className={flatView(view) ? "chosen" : ""}
+                    onClick={() => camera("top")}
+                  >
+                    2D
+                  </button>
+                  <button
+                    aria-pressed={!flatView(view)}
+                    className={!flatView(view) ? "chosen" : ""}
+                    onClick={() => camera("main")}
+                  >
+                    3D
+                  </button>
+                </div>
+                <select
+                  aria-label="Camera view"
+                  value={view}
+                  onChange={(e) => camera(e.target.value)}
+                >
+                  {flatView(view) ? (
+                    ["top", "front", "back", "left", "right"].map((v) => (
+                      <option key={v} value={v}>
+                        {v[0].toUpperCase() + v.slice(1)}
+                      </option>
+                    ))
+                  ) : (
+                    <>
+                      <option value="main">Front right</option>
+                      <option value="reverse">Back left</option>
+                      <option value="iso-front-left">Front left</option>
+                      <option value="iso-back-right">Back right</option>
+                    </>
+                  )}
+                </select>
+              </div>
             </div>
           </div>
           <div className="viewport" ref={host} />
@@ -1022,7 +1061,9 @@ function App() {
                     ? "Drag the rotation ring · Shift for finer steps"
                     : tool === "scale"
                       ? "Select a part, structure or group · 0.5 halves size; 2 doubles it"
-                      : "Drag to draw a footprint"}
+                      : tool === "add"
+                        ? "Click to place a shape · Escape cancels"
+                        : "Drag to draw a footprint"}
             </span>
           </div>
         </main>
@@ -1044,7 +1085,7 @@ function App() {
               Component Settings
             </button>
           </div>
-          <div hidden={settingsTab !== "part"}>
+          <div className="component-scroll" hidden={settingsTab !== "part"}>
             <div className="section-head">
               {selected?.includes(":")
                 ? "COLLECTION PROPERTIES"
@@ -1120,317 +1161,471 @@ function App() {
                   value={p.name}
                   onChange={(e) => update({ name: e.target.value })}
                 />
-                {aspectSettings()}
-                <label className="field">
-                  Group
-                  <select
-                    aria-label="Component group"
-                    value={p.groupId ?? ""}
-                    onChange={(e) =>
-                      commit(assignGroup(d, p.id, e.target.value || undefined))
-                    }
-                  >
-                    <option value="">Ungrouped</option>
-                    {(d.groups ?? []).map((g) => (
-                      <option key={g.id} value={g.id}>
-                        {g.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <div className="pair">
-                  <Num
-                    label={p.shape === "circle" ? "Bottom diameter" : "Width"}
-                    value={p.width}
-                    min={p.shape === "circle" ? 0.1 : step}
-                    step={step}
-                    onChange={(width) =>
-                      update(
-                        p.shape === "circle"
-                          ? {
-                              width,
-                              depth: width,
-                              topDiameter: p.topDiameter ?? p.width,
-                            }
-                          : { width },
-                      )
-                    }
-                  />
-                  <Num
-                    label={p.shape === "circle" ? "Top diameter" : "Depth"}
-                    value={
-                      p.shape === "circle"
-                        ? (p.topDiameter ?? p.width)
-                        : p.depth
-                    }
-                    min={p.shape === "circle" ? 0.1 : step}
-                    step={step}
-                    onChange={(depth) =>
-                      update(
-                        p.shape === "circle"
-                          ? { topDiameter: depth }
-                          : { depth },
-                      )
-                    }
-                  />
-                </div>
-                <div className="pair">
-                  <Num
-                    label="Position X"
-                    value={p.x}
-                    min={-1000}
-                    max={1000}
-                    step={step}
-                    onChange={(x) => update({ x })}
-                  />
-                  <Num
-                    label="Position Z"
-                    value={p.z}
-                    min={-1000}
-                    max={1000}
-                    step={step}
-                    onChange={(z) => update({ z })}
-                  />
-                </div>
-                <div className="pair">
-                  <Num
-                    label="Floors"
-                    value={Number(estimatedFloors(p).toFixed(2))}
-                    min={0.1}
-                    max={1000}
-                    step={0.1}
-                    unit=""
-                    onChange={(floors) =>
-                      update({
-                        floors,
-                        cornerHeights: undefined,
-                        wallHeight: undefined,
-                      })
-                    }
-                  />
-                  <Num
-                    label="Floor height"
-                    value={p.floorHeight}
-                    min={0.5}
-                    max={20}
-                    step={0.25}
-                    onChange={(floorHeight) =>
-                      update({
-                        floorHeight,
-                        wallHeight: height(p),
-                        cornerHeights: undefined,
-                      })
-                    }
-                  />
-                </div>
-                <Num
-                  label={
-                    p.shape === "circle" ? "Height" : "Wall / eaves height"
-                  }
-                  value={height(p)}
-                  min={0.1}
-                  max={500}
-                  step={step}
-                  onChange={(wallHeight) =>
-                    update({ wallHeight, cornerHeights: undefined })
-                  }
-                />
-                <p className="micro">
-                  Floor count updates from this height. Drag in grid
-                  subdivisions; nearby eaves and roof tops snap automatically.
-                </p>
-                <Num
-                  label="Base elevation"
-                  value={baseY(p)}
-                  min={0}
-                  max={500}
-                  step={step}
-                  onChange={(baseY) => update({ baseY })}
-                />
-                <Num
-                  label="Part rotation"
-                  value={p.rotation}
-                  min={0}
-                  max={360}
-                  step={15}
-                  unit="°"
-                  onChange={(rotation) => update({ rotation })}
-                />
-                {p.cornerBases && (
-                  <button
-                    className="wide"
-                    onClick={() => update({ cornerBases: undefined })}
-                  >
-                    Level wall bases
-                  </button>
-                )}
-                {p.cornerHeights && (
-                  <button
-                    className="wide"
-                    onClick={() => update({ cornerHeights: undefined })}
-                  >
-                    Level wall tops
-                  </button>
-                )}
-                <p className="micro">
-                  Floor guides use this part’s {p.floorHeight} m floor height.
-                  Base elevation lifts a part onto a roof.
-                </p>
-                <div className="section-head divider">ROOF</div>
-                <label className="field">
-                  Roof shape
-                  <select
-                    aria-label="Roof shape"
-                    value={p.roof}
-                    onChange={(e) =>
-                      update({
-                        roof: e.target.value as Part["roof"],
-                        ridgeEnds: undefined,
-                      })
-                    }
-                  >
-                    <option value="gable" disabled={p.shape === "circle"}>
-                      Gable / pitched
-                    </option>
-                    <option value="lean-to" disabled={p.shape === "circle"}>
-                      Lean-to / single slope
-                    </option>
-                    <option value="flat">Flat</option>
-                  </select>
-                </label>
-                {p.roof === "gable" && (
+                <details className="part-section">
+                  <summary>Organisation & aspect</summary>
+                  {aspectSettings()}
                   <label className="field">
-                    Ridge direction
+                    Group
                     <select
-                      value={p.ridge}
+                      aria-label="Component group"
+                      value={p.groupId ?? ""}
                       onChange={(e) =>
-                        update({
-                          ridge: e.target.value as Part["ridge"],
-                          ridgeEnds: undefined,
-                        })
+                        commit(
+                          assignGroup(d, p.id, e.target.value || undefined),
+                        )
                       }
                     >
-                      <option value="width">Along width</option>
-                      <option value="depth">Along depth</option>
-                    </select>
-                  </label>
-                )}
-                {p.roof === "gable" && (
-                  <>
-                    <div className="pair">
-                      {[0, 1].map((i) => {
-                        const defaults = ridgeEnds({
-                            ...p,
-                            ridgeEnds: undefined,
-                          }),
-                          ends = ridgeEnds(p),
-                          axis = p.ridge === "width" ? 0 : 2,
-                          span = p.ridge === "width" ? p.width : p.depth;
-                        const value =
-                          (i === 0
-                            ? ends[i][axis] - defaults[i][axis]
-                            : defaults[i][axis] - ends[i][axis]) * span;
-                        return (
-                          <Num
-                            key={i}
-                            label={`Ridge ${i === 0 ? "start" : "end"} offset`}
-                            value={value}
-                            min={-span * 4.5}
-                            max={span * 0.49}
-                            step={step}
-                            onChange={(n) => {
-                              const next = clone(ends);
-                              next[i][axis] =
-                                defaults[i][axis] +
-                                ((i === 0 ? 1 : -1) * n) / span;
-                              update({ ridgeEnds: next });
-                            }}
-                          />
-                        );
-                      })}
-                    </div>
-                    <p className="micro">
-                      Positive offsets pull inward; negative offsets extend
-                      outward to meet adjoining roofs. Hover endpoints for XYZ
-                      arrows.
-                    </p>
-                    <button
-                      className="wide"
-                      onClick={() => update({ ridgeEnds: undefined })}
-                    >
-                      Reset ridge ends
-                    </button>
-                  </>
-                )}
-                {p.roof === "lean-to" && (
-                  <label className="field">
-                    High edge
-                    <select
-                      value={p.highEdge}
-                      onChange={(e) =>
-                        update({ highEdge: e.target.value as Part["highEdge"] })
-                      }
-                    >
-                      {["front", "back", "left", "right"].map((x) => (
-                        <option key={x}>{x}</option>
+                      <option value="">Ungrouped</option>
+                      {(d.groups ?? []).map((g) => (
+                        <option key={g.id} value={g.id}>
+                          {g.name}
+                        </option>
                       ))}
                     </select>
                   </label>
-                )}
-                {p.roof !== "flat" && (
-                  <>
+                </details>
+                <details className="part-section" open>
+                  <summary>Dimensions</summary>
+                  <div className="pair">
                     <Num
-                      label="Roof rise"
-                      value={p.rise}
-                      min={0}
-                      max={50}
+                      label={
+                        p.innerDiameter !== undefined
+                          ? "Bottom outer diameter"
+                          : p.shape === "circle"
+                            ? "Bottom diameter"
+                            : "Width"
+                      }
+                      value={p.width}
+                      min={
+                        p.innerDiameter !== undefined
+                          ? p.innerDiameter + 0.1
+                          : p.shape === "circle"
+                            ? 0.1
+                            : step
+                      }
                       step={step}
-                      onChange={(rise) =>
+                      onChange={(width) =>
+                        update(
+                          p.shape === "circle"
+                            ? {
+                                width,
+                                depth: width,
+                                ...(p.innerDiameter !== undefined
+                                  ? {
+                                      topInnerDiameter:
+                                        p.topInnerDiameter ?? p.innerDiameter,
+                                    }
+                                  : {}),
+                                topDiameter: p.topDiameter ?? p.width,
+                              }
+                            : { width },
+                        )
+                      }
+                    />
+                    <Num
+                      label={
+                        p.innerDiameter !== undefined
+                          ? "Bottom inner diameter"
+                          : p.shape === "circle"
+                            ? "Top diameter"
+                            : "Depth"
+                      }
+                      value={
+                        p.shape === "circle"
+                          ? (p.innerDiameter ?? p.topDiameter ?? p.width)
+                          : p.depth
+                      }
+                      min={p.shape === "circle" ? 0.1 : step}
+                      max={p.innerDiameter !== undefined ? p.width - 0.1 : 500}
+                      step={step}
+                      onChange={(depth) =>
+                        update(
+                          p.shape === "circle"
+                            ? p.innerDiameter !== undefined
+                              ? {
+                                  innerDiameter: depth,
+                                  topInnerDiameter:
+                                    p.topInnerDiameter ?? p.innerDiameter,
+                                }
+                              : { topDiameter: depth }
+                            : { depth },
+                        )
+                      }
+                    />
+                  </div>
+                  {p.innerDiameter !== undefined && (
+                    <div className="pair">
+                      <Num
+                        label="Top outer diameter"
+                        value={p.topDiameter ?? p.width}
+                        min={(p.topInnerDiameter ?? p.innerDiameter) + 0.1}
+                        max={500}
+                        step={step}
+                        onChange={(topDiameter) => update({ topDiameter })}
+                      />
+                      <Num
+                        label="Top inner diameter"
+                        value={p.topInnerDiameter ?? p.innerDiameter}
+                        min={0.1}
+                        max={(p.topDiameter ?? p.width) - 0.1}
+                        step={step}
+                        onChange={(topInnerDiameter) =>
+                          update({ topInnerDiameter })
+                        }
+                      />
+                    </div>
+                  )}
+                </details>
+                <details className="part-section">
+                  <summary>Position</summary>
+                  <div className="pair">
+                    <Num
+                      label="Position X"
+                      value={p.x}
+                      min={-1000}
+                      max={1000}
+                      step={step}
+                      onChange={(x) => update({ x })}
+                    />
+                    <Num
+                      label="Position Z"
+                      value={p.z}
+                      min={-1000}
+                      max={1000}
+                      step={step}
+                      onChange={(z) => update({ z })}
+                    />
+                  </div>
+                </details>
+                <details className="part-section">
+                  <summary>Floors / walls</summary>
+                  <div className="pair">
+                    <Num
+                      label="Floors"
+                      value={Number(estimatedFloors(p).toFixed(2))}
+                      min={0.1}
+                      max={1000}
+                      step={0.1}
+                      unit=""
+                      onChange={(floors) =>
                         update({
-                          rise,
-                          ridgeEnds: p.ridgeEnds?.map(([x, y, z]) => [
-                            x,
-                            Math.max(0, y + rise - p.rise),
-                            z,
-                          ]),
+                          floors,
+                          cornerHeights: undefined,
+                          wallHeight: undefined,
                         })
                       }
                     />
-                    <div className="metric">
-                      ROOF PITCH{" "}
-                      <strong>
-                        {(
-                          (Math.atan(
-                            p.rise /
-                              (p.roof === "gable"
-                                ? (p.ridge === "width" ? p.depth : p.width) / 2
-                                : p.highEdge === "left" ||
-                                    p.highEdge === "right"
-                                  ? p.width
-                                  : p.depth),
-                          ) *
-                            180) /
-                          Math.PI
-                        ).toFixed(1)}
-                        °
-                      </strong>
-                    </div>
-                  </>
-                )}
-                <label className="field">
-                  Materials
-                  <textarea
-                    aria-label="Materials"
-                    value={p.materials}
-                    onChange={(e) => update({ materials: e.target.value })}
+                    <Num
+                      label="Floor height"
+                      value={p.floorHeight}
+                      min={0.5}
+                      max={20}
+                      step={0.25}
+                      onChange={(floorHeight) =>
+                        update({
+                          floorHeight,
+                          wallHeight: height(p),
+                          cornerHeights: undefined,
+                        })
+                      }
+                    />
+                  </div>
+                  <Num
+                    label={
+                      p.shape === "circle" ? "Height" : "Wall / eaves height"
+                    }
+                    value={height(p)}
+                    min={0.1}
+                    max={500}
+                    step={step}
+                    onChange={(wallHeight) =>
+                      update({ wallHeight, cornerHeights: undefined })
+                    }
                   />
-                </label>
-                <div className="pair actions">
-                  <button onClick={duplicate}>Duplicate</button>
-                  <button className="danger" onClick={remove}>
-                    Delete part
-                  </button>
-                </div>
+                  <p className="micro">
+                    Floor count updates from this height. Drag in grid
+                    subdivisions; nearby eaves and roof tops snap automatically.
+                  </p>
+                </details>
+                <details className="part-section">
+                  <summary>Elevation / rotation</summary>
+                  <Num
+                    label="Base elevation"
+                    value={baseY(p)}
+                    min={0}
+                    max={500}
+                    step={step}
+                    onChange={(baseY) => update({ baseY })}
+                  />
+                  <Num
+                    label="Part rotation"
+                    value={p.rotation}
+                    min={0}
+                    max={360}
+                    step={15}
+                    unit="°"
+                    onChange={(rotation) => update({ rotation })}
+                  />
+                  {p.cornerBases && (
+                    <button
+                      className="wide"
+                      onClick={() => update({ cornerBases: undefined })}
+                    >
+                      Level wall bases
+                    </button>
+                  )}
+                  {p.cornerHeights && (
+                    <button
+                      className="wide"
+                      onClick={() => update({ cornerHeights: undefined })}
+                    >
+                      Level wall tops
+                    </button>
+                  )}
+                  <p className="micro">
+                    Floor guides use this part’s {p.floorHeight} m floor height.
+                    Base elevation lifts a part onto a roof.
+                  </p>
+                </details>
+                <details className="part-section">
+                  <summary>Roof</summary>
+                  <label className="settings-check">
+                    <input
+                      type="checkbox"
+                      checked={p.roofEnabled !== false}
+                      onChange={(e) =>
+                        update({ roofEnabled: e.target.checked })
+                      }
+                    />{" "}
+                    Roof enabled
+                  </label>
+                  {p.roofEnabled !== false && (
+                    <>
+                      <label className="field">
+                        Roof shape
+                        <select
+                          aria-label="Roof shape"
+                          value={p.roof}
+                          onChange={(e) =>
+                            update({
+                              roof: e.target.value as Part["roof"],
+                              ridgeEnds: undefined,
+                            })
+                          }
+                        >
+                          <option value="gable" disabled={p.shape === "circle"}>
+                            Gable / pitched
+                          </option>
+                          <option
+                            value="lean-to"
+                            disabled={p.shape === "circle"}
+                          >
+                            Lean-to / single slope
+                          </option>
+                          <option value="flat">Flat</option>
+                        </select>
+                      </label>
+                      {p.roof === "gable" && (
+                        <label className="field">
+                          Ridge direction
+                          <select
+                            value={p.ridge}
+                            onChange={(e) =>
+                              update({
+                                ridge: e.target.value as Part["ridge"],
+                                ridgeEnds: undefined,
+                              })
+                            }
+                          >
+                            <option value="width">Along width</option>
+                            <option value="depth">Along depth</option>
+                          </select>
+                        </label>
+                      )}
+                      {p.roof === "gable" && (
+                        <>
+                          <div className="pair">
+                            {[0, 1].map((i) => {
+                              const defaults = ridgeEnds({
+                                  ...p,
+                                  ridgeEnds: undefined,
+                                }),
+                                ends = ridgeEnds(p),
+                                axis = p.ridge === "width" ? 0 : 2,
+                                span = p.ridge === "width" ? p.width : p.depth;
+                              const value =
+                                (i === 0
+                                  ? ends[i][axis] - defaults[i][axis]
+                                  : defaults[i][axis] - ends[i][axis]) * span;
+                              return (
+                                <Num
+                                  key={i}
+                                  label={`Ridge ${i === 0 ? "start" : "end"} offset`}
+                                  value={value}
+                                  min={-span * 4.5}
+                                  max={span * 0.49}
+                                  step={step}
+                                  onChange={(n) => {
+                                    const next = clone(ends);
+                                    next[i][axis] =
+                                      defaults[i][axis] +
+                                      ((i === 0 ? 1 : -1) * n) / span;
+                                    update({ ridgeEnds: next });
+                                  }}
+                                />
+                              );
+                            })}
+                          </div>
+                          <p className="micro">
+                            Positive offsets pull inward; negative offsets
+                            extend outward to meet adjoining roofs. Hover
+                            endpoints for XYZ arrows.
+                          </p>
+                          <button
+                            className="wide"
+                            onClick={() => update({ ridgeEnds: undefined })}
+                          >
+                            Reset ridge ends
+                          </button>
+                        </>
+                      )}
+                      {p.roof === "lean-to" && (
+                        <label className="field">
+                          High edge
+                          <select
+                            value={p.highEdge}
+                            onChange={(e) =>
+                              update({
+                                highEdge: e.target.value as Part["highEdge"],
+                              })
+                            }
+                          >
+                            {["front", "back", "left", "right"].map((x) => (
+                              <option key={x}>{x}</option>
+                            ))}
+                          </select>
+                        </label>
+                      )}
+                      {p.roof !== "flat" && (
+                        <>
+                          <Num
+                            label="Roof rise"
+                            value={p.rise}
+                            min={0}
+                            max={50}
+                            step={step}
+                            onChange={(rise) =>
+                              update({
+                                rise,
+                                ridgeEnds: p.ridgeEnds?.map(([x, y, z]) => [
+                                  x,
+                                  Math.max(0, y + rise - p.rise),
+                                  z,
+                                ]),
+                              })
+                            }
+                          />
+                          <div className="metric">
+                            ROOF PITCH{" "}
+                            <strong>
+                              {(
+                                (Math.atan(
+                                  p.rise /
+                                    (p.roof === "gable"
+                                      ? (p.ridge === "width"
+                                          ? p.depth
+                                          : p.width) / 2
+                                      : p.highEdge === "left" ||
+                                          p.highEdge === "right"
+                                        ? p.width
+                                        : p.depth),
+                                ) *
+                                  180) /
+                                Math.PI
+                              ).toFixed(1)}
+                              °
+                            </strong>
+                          </div>
+                        </>
+                      )}
+                    </>
+                  )}
+                </details>
+                <details className="part-section">
+                  <summary>Subdivisions</summary>
+                  <label className="settings-check">
+                    <input
+                      type="checkbox"
+                      checked={p.subdivisions?.enabled ?? false}
+                      onChange={(e) =>
+                        update({
+                          subdivisions: {
+                            ...subdivisionDefaults(p),
+                            enabled: e.target.checked,
+                          },
+                        })
+                      }
+                    />{" "}
+                    Preview subdivisions
+                  </label>
+                  {p.subdivisions?.enabled && (
+                    <>
+                      {(["x", "y", "z"] as const).map((axis, i) => (
+                        <Num
+                          key={axis}
+                          label={
+                            p.shape === "circle"
+                              ? ["Around", "Height", "Radial / wall thickness"][
+                                  i
+                                ]
+                              : `${axis.toUpperCase()} divisions`
+                          }
+                          value={subdivisionDefaults(p)[axis]}
+                          min={p.shape === "circle" && axis === "x" ? 3 : 1}
+                          max={64}
+                          step={1}
+                          unit=""
+                          onChange={(n) =>
+                            update({
+                              subdivisions: {
+                                ...subdivisionDefaults(p),
+                                [axis]: Math.round(n),
+                              },
+                            })
+                          }
+                        />
+                      ))}
+                      <p className="micro">
+                        Body surface estimate:{" "}
+                        {(() => {
+                          const { x, y, z } = subdivisionDefaults(p);
+                          return p.shape === "circle"
+                            ? x * y * (p.innerDiameter === undefined ? 1 : 2) +
+                                2 * x * z
+                            : 2 * (x * y + x * z + y * z);
+                        })()}{" "}
+                        patches. Roof excluded.
+                      </p>
+                    </>
+                  )}
+                  <p className="micro">
+                    Preview only — no new editable vertices yet. Counts are
+                    segments, not extra cuts. Reference images exclude these
+                    guides. Conversion and UV unwrapping will be added with mesh
+                    editing.
+                  </p>
+                </details>
+                <details className="part-section">
+                  <summary>Materials</summary>
+                  <label className="field">
+                    Materials
+                    <textarea
+                      aria-label="Materials"
+                      value={p.materials}
+                      onChange={(e) => update({ materials: e.target.value })}
+                    />
+                  </label>
+                </details>
               </>
             ) : (
               <p className="aside-note">
@@ -1439,6 +1634,14 @@ function App() {
               </p>
             )}
           </div>
+          {settingsTab === "part" && p && !selected?.includes(":") && (
+            <div className="pair actions part-actions">
+              <button onClick={duplicate}>Duplicate</button>
+              <button className="danger" onClick={remove}>
+                Delete part
+              </button>
+            </div>
+          )}
         </Floating>
       </div>
       {libraryOpen && (

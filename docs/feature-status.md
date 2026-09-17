@@ -48,3 +48,19 @@ Snapshot: 17 September 2026. Completed means implemented in the current source; 
 5. Agree mesh formats, budgets and engine conventions before implementing structural mesh exports.
 
 The initial implementation plan intentionally proposed a smaller single-building MVP. Current scenes, groups, free part rotation, fractional floors and SQLite supersede those original restrictions.
+
+## Follow-up: Add primitives
+
+Completed: cursor-preview placement for cube/cylinder/donut, open-bore ring geometry, height/inner/outer-diameter handles and numeric controls, persistence/brief/scaling support, header undo/redo and grouped view controls. Ring taper is implemented with independent inner/outer diameters at both ends. Hole-aware structure/terrain contact is not implemented. Automated suite now contains 31 tests.
+
+## Handle visibility and X-ray
+
+Circular diameter controls are available in every Select mode; donut controls identify both ends with labels. Editor-only X-ray sits beside terrain/floor guides and does not apply to reference exports. Automated suite: 32 tests.
+
+Handle labels now use a content-width cursor tooltip shown only on hover, replacing persistent donut/move/rotate text.
+
+Straight wall edges now highlight and accept dragging along their full length in Edges selection; corner elevations are reflected in sloping edge highlights.
+
+Component Settings is wider and grouped into accordions, with a fixed action footer. Roof enable/disable removes/restores roof geometry without discarding its settings. Automated suite: 33 tests.
+
+Subdivision body preview is available with local axis/circular counts and surface-patch estimates. Editable mesh conversion, roof subdivisions and UV export remain planned. Automated suite: 34 tests.

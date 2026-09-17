@@ -1,3 +1,4 @@
+import { subdivisionPreview } from "./subdivisions";
 import { terrainPatches } from "./terrain";
 import { referenceViews, flatView, viewPose } from "./views";
 import { canEditHandle, type SelectionMode } from "./editing";
@@ -27,7 +28,8 @@ import {
   aspectOwner,
   translateSelection,
 } from "./model";
-export type Tool = "select" | "draw" | "move" | "rotate" | "scale";
+import { primitive, type Primitive } from "./model";
+export type Tool = "add" | "select" | "draw" | "move" | "rotate" | "scale";
 type Callbacks = {
   tool: (tool: Tool) => void;
   select: (id: string | null) => void;
@@ -50,8 +52,12 @@ export class Stage {
   selectionMode: SelectionMode = "vertices";
   view = "main";
   drawShape: "rectangle" | "circle" = "rectangle";
+  addShape: Primitive = "cube";
+  preview = new T.Group();
   showFloors = true;
   showTerrain = true;
+  xray = false;
+  tooltip = document.createElement("div");
   exporting = false;
   terrain = new T.Group();
   moveAxes = false;
@@ -75,6 +81,10 @@ export class Stage {
   } = null;
   constructor(host: HTMLElement, d: Plan, cb: Callbacks) {
     this.host = host;
+    this.tooltip.className = "handle-tooltip";
+    this.tooltip.setAttribute("role", "tooltip");
+    this.tooltip.hidden = true;
+    document.body.append(this.tooltip);
     this.plan = d;
     this.cb = cb;
     this.renderer = new T.WebGLRenderer({
@@ -109,6 +119,7 @@ export class Stage {
     el.addEventListener("dblclick", this.doubleClick);
     el.addEventListener("pointerdown", this.down, true);
     el.addEventListener("pointermove", this.move, true);
+    el.addEventListener("pointerleave", this.leave);
     el.addEventListener("pointerup", this.up, true);
     el.addEventListener("pointercancel", this.cancel, true);
     window.addEventListener("keydown", this.key);
@@ -132,12 +143,17 @@ export class Stage {
     if (this.drag && (tool !== this.tool || selected !== this.selected))
       this.cancel();
     if (tool !== this.tool || selected !== this.selected) this.moveAxes = false;
+    this.disposeGroup(this.preview);
     this.plan = d;
     this.selected = selected;
     this.tool = tool;
     this.controls.enableRotate = !flatView(this.view) && tool === "select";
     this.host.style.cursor =
-      tool === "draw" ? "crosshair" : tool === "move" ? "move" : "default";
+      tool === "draw" || tool === "add"
+        ? "crosshair"
+        : tool === "move"
+          ? "move"
+          : "default";
     this.rebuild();
   }
   roof(p: Part) {
@@ -152,6 +168,7 @@ export class Stage {
     );
   }
   rebuild() {
+    this.tooltip.hidden = true;
     this.disposeGroup(this.hover);
     this.disposeGroup(this.solids);
     this.disposeGroup(this.aids);
@@ -246,17 +263,41 @@ export class Stage {
       wall.userData.wall = true;
       wall.userData.part = p.id;
       group.add(wall);
-      const roof = this.roof(p);
-      roof.userData.part = p.id;
-      group.add(roof);
+      const roof = p.roofEnabled === false ? null : this.roof(p);
+      if (roof) {
+        roof.userData.part = p.id;
+        group.add(roof);
+      }
       this.solids.add(group);
-      for (const mesh of [wall, roof]) {
+      if (p.subdivisions?.enabled) {
+        const { geometry } = subdivisionPreview(p);
+        const overlay = new T.LineSegments(
+          geometry,
+          new T.LineBasicMaterial({
+            color: 0xf4c977,
+            transparent: true,
+            opacity: 0.8,
+            depthTest: !this.xray,
+          }),
+        );
+        overlay.position.copy(group.position);
+        overlay.rotation.copy(group.rotation);
+        overlay.renderOrder = 5;
+        this.aids.add(overlay);
+      }
+      for (const mesh of roof ? [wall, roof] : [wall]) {
+        mesh.material.transparent = this.xray;
+        mesh.material.opacity = this.xray ? 0.22 : 1;
+        mesh.material.depthWrite = !this.xray;
+      }
+      for (const mesh of roof ? [wall, roof] : [wall]) {
         const line = new T.LineSegments(
           new T.EdgesGeometry(mesh.geometry, 25),
           new T.LineBasicMaterial({
-            color: 0x394c47,
+            color: this.xray ? 0xa1d7d1 : 0x394c47,
             transparent: true,
-            opacity: 0.35,
+            opacity: this.xray ? 0.75 : 0.35,
+            depthTest: !this.xray,
           }),
         );
         line.position.copy(mesh.position);
@@ -290,11 +331,6 @@ export class Stage {
           ring.userData = { handle: "rotate", part: p.id };
           ring.renderOrder = 12;
           this.aids.add(ring);
-          this.label(
-            `${p.rotation.toFixed(0)}° · drag ring`,
-            new T.Vector3(p.x, baseY(p) + 0.3, p.z),
-            this.aids,
-          );
         } else if (this.tool === "move") {
           this.handle("move", p, 0, height(p) / 2, 0, 0x53d7c2);
           if (this.moveAxes)
@@ -303,19 +339,36 @@ export class Stage {
               "move",
               p,
             );
-          this.label(
-            collection ? "Move selection" : "Move whole part",
-            new T.Vector3(p.x, baseY(p) + height(p) / 2 + 0.7, p.z),
-            this.aids,
-          );
         } else this.handle("height", p, 0, height(p) + 0.3, 0, 0x48d4c0);
-        if (p.roof === "gable" && this.tool !== "rotate")
+        if (
+          p.roofEnabled !== false &&
+          p.roof === "gable" &&
+          this.tool !== "rotate"
+        )
           for (const [i, q] of ridgeEnds(p).entries()) {
             const v = rot(q[0] * p.width, q[2] * p.depth);
             this.handle(`ridge:${i}`, p, v.x, height(p) + q[1], v.z, 0xb3d9ff);
           }
         if (p.shape === "circle" && this.tool !== "rotate") {
           this.handle("radius-bottom", p, p.width / 2, 0.05, 0, 0x53d7c2);
+          if (p.innerDiameter !== undefined) {
+            this.handle(
+              "radius-inner-bottom",
+              p,
+              -p.innerDiameter / 2,
+              0.05,
+              0,
+              0xffcb80,
+            );
+            this.handle(
+              "radius-inner-top",
+              p,
+              -(p.topInnerDiameter ?? p.innerDiameter) / 2,
+              height(p) + 0.12,
+              0,
+              0xffb460,
+            );
+          }
           this.handle(
             "radius-top",
             p,
@@ -327,6 +380,7 @@ export class Stage {
         }
 
         if (
+          p.roofEnabled !== false &&
           p.roof === "gable" &&
           canEditHandle(this.tool, this.selectionMode, "roof")
         ) {
@@ -353,7 +407,11 @@ export class Stage {
           line.renderOrder = 12;
           this.aids.add(line);
         }
-        if (p.roof === "lean-to" && this.tool !== "rotate") {
+        if (
+          p.roofEnabled !== false &&
+          p.roof === "lean-to" &&
+          this.tool !== "rotate"
+        ) {
           let x = 0,
             z = 0;
           if (p.roof === "lean-to") {
@@ -479,13 +537,19 @@ export class Stage {
     if (!canEditHandle(this.tool, this.selectionMode, kind)) return;
     const m = new T.Mesh(
       new T.SphereGeometry(kind === "move" ? 0.38 : 0.24, 16, 12),
-      new T.MeshBasicMaterial({ color, depthTest: false }),
+      new T.MeshBasicMaterial({
+        color,
+        depthTest: false,
+        depthWrite: false,
+        transparent: true,
+      }),
     );
     m.position.set(p.x + x, baseY(p) + y, p.z + z);
     m.userData = { handle: kind, part: p.id };
     m.renderOrder = 10;
     this.aids.add(m);
   }
+
   getRay(e: MouseEvent) {
     const r = this.renderer.domElement.getBoundingClientRect();
     this.ray.setFromCamera(
@@ -513,7 +577,24 @@ export class Stage {
     this.cb.hint("Select mode");
   };
   down = (e: PointerEvent) => {
+    this.tooltip.hidden = true;
     if (e.button !== 0) return;
+    if (this.tool === "add") {
+      const p = this.placement(e);
+      if (!p) return;
+      const d = clone(this.plan);
+      p.name += " " + (d.parts.length + 1);
+      p.role = d.parts.length ? "extension" : "main";
+      d.parts.push(p);
+      this.disposeGroup(this.preview);
+      this.cb.commit(d);
+      this.cb.select(p.id);
+      this.selectionMode = "faces";
+      this.cb.tool("select");
+      this.cb.hint("Shape placed · edit dimensions in Component Settings");
+      e.stopImmediatePropagation();
+      return;
+    }
     this.getRay(e);
     const hits = this.ray
       .intersectObjects([...this.aids.children, ...this.hover.children])
@@ -617,9 +698,49 @@ export class Stage {
         : "Drag to adjust · Escape cancels",
     );
   };
+  leave = () => {
+    this.tooltip.hidden = true;
+    this.disposeGroup(this.preview);
+  };
+  placement(e: PointerEvent) {
+    this.getRay(e);
+    const body = this.ray
+      .intersectObjects(this.solids.children, true)
+      .find((x) => x.object.userData.part);
+    const q =
+      body?.point ?? this.planePoint(new T.Plane(new T.Vector3(0, 1, 0), 0));
+    if (!q) return null;
+    const p = primitive(this.addShape, this.plan.moduleSize);
+    const step = this.plan.moduleSize / this.plan.subdivision;
+    p.x = snap(q.x, step);
+    p.z = snap(q.z, step);
+    p.baseY = Math.max(0, body ? q.y : 0);
+    return p;
+  }
   move = (e: PointerEvent) => {
+    if (this.tool === "add") {
+      this.disposeGroup(this.preview);
+      const p = this.placement(e);
+      if (p) {
+        const mesh = new T.Mesh(
+          partGeometry(p, false),
+          new T.MeshBasicMaterial({
+            color: 0x53d7c2,
+            transparent: true,
+            opacity: 0.45,
+            side: T.DoubleSide,
+            depthWrite: false,
+          }),
+        );
+        mesh.position.set(p.x, baseY(p), p.z);
+        this.preview.add(mesh);
+        this.scene.add(this.preview);
+      }
+      return;
+    }
     if (!this.drag) {
       this.showHover(e);
+      this.showTooltip(e);
       return;
     }
     e.stopImmediatePropagation();
@@ -695,25 +816,37 @@ export class Stage {
           360;
         this.cb.hint(`${p.rotation}° · 15° snap · Shift for 1°`);
       } else if (this.drag.kind.startsWith("radius-")) {
-        const isTop = this.drag.kind === "radius-top";
+        const isTop = this.drag.kind.endsWith("top");
+        const isInner = this.drag.kind.startsWith("radius-inner");
+        const inner = isTop
+          ? (old.topInnerDiameter ?? old.innerDiameter)
+          : old.innerDiameter;
+        const outer = isTop ? (old.topDiameter ?? old.width) : old.width;
+        const start = isInner ? inner! : outer;
         const diameter = Math.min(
           500,
           Math.max(
             0.1,
             snap(
-              (isTop ? (old.topDiameter ?? old.width) : old.width) +
-                (axis === "z" ? delta.z : delta.x) * 2,
+              start + (axis === "z" ? delta.z : delta.x) * (isInner ? -2 : 2),
               step,
             ),
           ),
         );
-        if (isTop) p.topDiameter = diameter;
-        else {
-          p.topDiameter = old.topDiameter ?? old.width;
-          p.width = p.depth = diameter;
-        }
+        // Materialise defaults before editing one end, keeping the other fixed.
+        p.topDiameter = old.topDiameter ?? old.width;
+        if (old.innerDiameter !== undefined)
+          p.topInnerDiameter = old.topInnerDiameter ?? old.innerDiameter;
+        const value = isInner
+          ? Math.min(diameter, outer - 0.1)
+          : Math.max(diameter, inner === undefined ? 0.1 : inner + 0.1);
+        if (isInner) {
+          if (isTop) p.topInnerDiameter = value;
+          else p.innerDiameter = value;
+        } else if (isTop) p.topDiameter = value;
+        else p.width = p.depth = value;
         this.cb.hint(
-          `${isTop ? "Top" : "Bottom"} diameter ${diameter.toFixed(2)} m`,
+          `${isTop ? "Top" : "Bottom"} ${isInner ? "inner" : "outer"} diameter ${value.toFixed(2)} m`,
         );
       } else if (this.drag.kind.startsWith("ridge:")) {
         const i = Number(this.drag.kind.split(":")[1]),
@@ -976,6 +1109,51 @@ export class Stage {
     this.plan = d;
     this.rebuild();
   };
+  showTooltip(e: PointerEvent) {
+    this.getRay(e);
+    const hit = this.ray
+      .intersectObjects([...this.aids.children, ...this.hover.children], true)
+      .find(
+        (h) =>
+          h.object.userData.handle &&
+          canEditHandle(
+            this.tool,
+            this.selectionMode,
+            h.object.userData.handle,
+          ),
+      );
+    if (!hit || this.drag || this.exporting) {
+      this.tooltip.hidden = true;
+      return;
+    }
+    const { handle: kind, axis } = hit.object.userData;
+    let text: string;
+    if (kind.startsWith("radius-"))
+      text = `${kind.endsWith("top") ? "Top" : "Bottom"} ${kind.includes("inner") ? "inner" : "outer"} diameter`;
+    else
+      text =
+        (
+          {
+            height: "Height",
+            roof: "Roof height",
+            move: "Move selection",
+            rotate: "Rotate part",
+          } as Record<string, string>
+        )[kind] ??
+        (kind.startsWith("ridge:")
+          ? "Roof ridge endpoint"
+          : kind.startsWith("vertex:")
+            ? "Vertex"
+            : kind.startsWith("face:")
+              ? "Wall face"
+              : "Edge");
+    this.tooltip.textContent =
+      text + (axis ? ` · ${axis.toUpperCase()} axis` : "");
+    this.tooltip.hidden = false;
+    const bounds = this.tooltip.getBoundingClientRect();
+    this.tooltip.style.left = `${Math.max(8, Math.min(e.clientX + 14, window.innerWidth - bounds.width - 8))}px`;
+    this.tooltip.style.top = `${Math.max(8, e.clientY - bounds.height - 12)}px`;
+  }
   showHover(e: PointerEvent) {
     if (this.tool !== "select") {
       if (this.tool === "move" && this.moveAxes) return;
@@ -989,20 +1167,31 @@ export class Stage {
     if (!p) return;
     const corners = worldCorners(p),
       r = this.renderer.domElement.getBoundingClientRect();
-    const candidates: { kind: string; pos: T.Vector3; level?: number }[] = [];
+    const candidates: {
+      kind: string;
+      pos: T.Vector3;
+      level?: number;
+      a?: T.Vector3;
+      b?: T.Vector3;
+    }[] = [];
     for (const child of this.aids.children)
       if (
         child.userData.handle &&
-        ["height", "roof", "radius-top", "radius-bottom"].includes(
-          child.userData.handle,
-        )
+        [
+          "height",
+          "roof",
+          "radius-top",
+          "radius-bottom",
+          "radius-inner-bottom",
+          "radius-inner-top",
+        ].includes(child.userData.handle)
       )
         candidates.push({
           kind: child.userData.handle,
           pos: child.position.clone(),
           level: 1,
         });
-    if (p.roof === "gable")
+    if (p.roofEnabled !== false && p.roof === "gable")
       for (const [i, end] of ridgeEnds(p).entries()) {
         const pos = new T.Vector3(
           end[0] * p.width,
@@ -1023,33 +1212,61 @@ export class Stage {
           pos: corners[i].clone().setY(baseY(p) + y),
           level: layer,
         });
+        const a = corners[i].clone().setY(baseY(p) + y);
+        const j = (i + 1) % 4;
+        const b = corners[j]
+          .clone()
+          .setY(
+            baseY(p) +
+              (layer === 0
+                ? (p.cornerBases?.[j] ?? 0)
+                : (p.cornerHeights?.[j] ?? height(p))),
+          );
         candidates.push({
           kind: `edge:${i}`,
-          pos: corners[i]
-            .clone()
-            .add(corners[(i + 1) % 4])
-            .multiplyScalar(0.5)
-            .setY(baseY(p) + y),
+          pos: a.clone().add(b).multiplyScalar(0.5),
           level: layer,
+          a,
+          b,
         });
       }
+      const a = corners[i].clone().setY(baseY(p) + (p.cornerBases?.[i] ?? 0));
+      const b = corners[i]
+        .clone()
+        .setY(baseY(p) + (p.cornerHeights?.[i] ?? height(p)));
       candidates.push({
         kind: `vertical:${i}`,
-        pos: corners[i].clone().setY(baseY(p) + height(p) / 2),
+        pos: a.clone().add(b).multiplyScalar(0.5),
         level: 1,
+        a,
+        b,
       });
     }
+
     const nearest = candidates
       .filter((c) => canEditHandle(this.tool, this.selectionMode, c.kind))
       .map((c) => {
-        const v = c.pos.clone().project(this.camera);
-        return {
-          ...c,
-          d: Math.hypot(
-            ((v.x + 1) * r.width) / 2 + r.left - e.clientX,
-            ((-v.y + 1) * r.height) / 2 + r.top - e.clientY,
-          ),
+        const screen = (point: T.Vector3) => {
+          const v = point.clone().project(this.camera);
+          return new T.Vector2(
+            ((v.x + 1) * r.width) / 2 + r.left,
+            ((-v.y + 1) * r.height) / 2 + r.top,
+          );
         };
+        let v = screen(c.pos);
+        if (c.a && c.b) {
+          const a = screen(c.a),
+            b = screen(c.b),
+            ab = b.clone().sub(a);
+          const t = T.MathUtils.clamp(
+            new T.Vector2(e.clientX, e.clientY).sub(a).dot(ab) /
+              Math.max(ab.lengthSq(), 1e-9),
+            0,
+            1,
+          );
+          v = a.addScaledVector(ab, t);
+        }
+        return { ...c, d: Math.hypot(v.x - e.clientX, v.y - e.clientY) };
       })
       .sort((a, b) => a.d - b.d)[0];
     let choice = nearest?.d < 20 ? nearest : undefined;
@@ -1107,6 +1324,33 @@ export class Stage {
         d: 0,
       };
     }
+    if (choice?.a && choice.b) {
+      const delta = choice.b.clone().sub(choice.a);
+      if (delta.length() < 1e-6) return;
+      const radius =
+        ((this.camera.top - this.camera.bottom) / this.camera.zoom / r.height) *
+        7;
+      const mesh = new T.Mesh(
+        new T.CylinderGeometry(radius, radius, delta.length(), 8),
+        new T.MeshBasicMaterial({
+          color: 0x66ead4,
+          transparent: true,
+          opacity: 0.85,
+          depthTest: false,
+          depthWrite: false,
+        }),
+      );
+      mesh.position.copy(choice.pos);
+      mesh.quaternion.setFromUnitVectors(
+        new T.Vector3(0, 1, 0),
+        delta.normalize(),
+      );
+      mesh.userData = { handle: choice.kind, part: p.id, level: choice.level };
+      mesh.renderOrder = 20;
+      this.hover.add(mesh);
+      this.axes(choice.pos, choice.kind, p, choice.level);
+      return;
+    }
     if (choice) {
       const mesh = new T.Mesh(
         new T.SphereGeometry(0.16, 12, 8),
@@ -1158,7 +1402,12 @@ export class Stage {
         length = 1.5;
       const rod = new T.Mesh(
         new T.CylinderGeometry(0.045, 0.045, length, 8),
-        new T.MeshBasicMaterial({ color, depthTest: false }),
+        new T.MeshBasicMaterial({
+          color,
+          depthTest: false,
+          depthWrite: false,
+          transparent: true,
+        }),
       );
       rod.quaternion.setFromUnitVectors(new T.Vector3(0, 1, 0), dir);
       rod.position.copy(pos).addScaledVector(dir, length / 2);
@@ -1166,7 +1415,12 @@ export class Stage {
       rod.renderOrder = 21;
       const tip = new T.Mesh(
         new T.ConeGeometry(0.14, 0.35, 12),
-        new T.MeshBasicMaterial({ color, depthTest: false }),
+        new T.MeshBasicMaterial({
+          color,
+          depthTest: false,
+          depthWrite: false,
+          transparent: true,
+        }),
       );
       tip.quaternion.copy(rod.quaternion);
       tip.position.copy(pos).addScaledVector(dir, length);
@@ -1201,6 +1455,7 @@ export class Stage {
     this.cb.hint("Ready");
   };
   cancel = () => {
+    this.disposeGroup(this.preview);
     if (!this.drag) return;
     this.plan = this.drag.initial;
     this.drag = null;
@@ -1255,7 +1510,13 @@ export class Stage {
     this.controls.update();
   }
   async captures(includeTerrain = true) {
+    this.disposeGroup(this.preview);
     this.exporting = true;
+    const wasXray = this.xray;
+    if (wasXray) {
+      this.xray = false;
+      this.rebuild();
+    }
     const terrainVisible = this.terrain.visible;
     this.terrain.visible = includeTerrain;
     const result: Record<string, Blob> = {};
@@ -1303,6 +1564,10 @@ export class Stage {
     } finally {
       this.terrain.visible = terrainVisible;
       this.exporting = false;
+      if (wasXray) {
+        this.xray = true;
+        this.rebuild();
+      }
       this.renderer.setPixelRatio(pixel);
       this.renderer.setSize(old.x, old.y, false);
       this.hover.visible = true;
@@ -1318,6 +1583,7 @@ export class Stage {
     this.renderer.render(this.scene, this.camera);
   };
   dispose() {
+    this.tooltip.remove();
     cancelAnimationFrame(this.raf);
     this.observer.disconnect();
     this.controls.dispose();

@@ -15,3 +15,4 @@ Asset Designer is a local 3D structural blockout editor. It creates consistent a
 - [Original plan](../PLAN.md): historical design proposal, superseded where current documentation differs.
 
 The feature register describes the current implementation. Devlogs record how it evolved. The original plan contains unimplemented proposals and must not be read as a completion checklist.
+- [Editable mesh plan](editable-mesh-plan.md): preview contract and proposed conversion, topology, UV and export workflow.

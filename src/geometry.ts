@@ -17,6 +17,44 @@ function clip(points: Point[], axis: number, positive: boolean): Point[] {
   return out;
 }
 export function partGeometry(p: Part, roof: boolean): T.BufferGeometry {
+  if (roof && p.roofEnabled === false) return new T.BufferGeometry();
+  if (p.shape === "circle" && p.innerDiameter !== undefined) {
+    // Linear annular taper: all four diameters remain independent.
+    const outer = roof ? (p.topDiameter ?? p.width) : p.width;
+    const inner = roof
+      ? (p.topInnerDiameter ?? p.innerDiameter)
+      : p.innerDiameter;
+    const topOuter = p.topDiameter ?? p.width;
+    const topInner = p.topInnerDiameter ?? p.innerDiameter;
+    const y0 = roof ? height(p) : 0,
+      y1 = roof ? height(p) + 0.12 : height(p);
+    const vertices: number[] = [];
+    const point = (i: number, diameter: number, y: number) => [
+      (Math.cos((i * Math.PI) / 16) * diameter) / 2,
+      y,
+      (Math.sin((i * Math.PI) / 16) * diameter) / 2,
+    ];
+    const quad = (a: number[], b: number[], c: number[], d: number[]) =>
+      vertices.push(...a, ...b, ...c, ...a, ...c, ...d);
+    for (let i = 0; i < 32; i++) {
+      const ob = point(i, outer, y0),
+        obn = point(i + 1, outer, y0),
+        ot = point(i, topOuter, y1),
+        otn = point(i + 1, topOuter, y1);
+      const ib = point(i, inner, y0),
+        ibn = point(i + 1, inner, y0),
+        it = point(i, topInner, y1),
+        itn = point(i + 1, topInner, y1);
+      quad(ob, ot, otn, obn);
+      quad(ib, ibn, itn, it);
+      quad(ot, it, itn, otn);
+      quad(ob, obn, ibn, ib);
+    }
+    const g = new T.BufferGeometry();
+    g.setAttribute("position", new T.Float32BufferAttribute(vertices, 3));
+    g.computeVertexNormals();
+    return g;
+  }
   if (p.shape === "circle") {
     const top = (p.topDiameter ?? p.width) / 2;
     const g = new T.CylinderGeometry(

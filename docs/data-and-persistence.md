@@ -50,3 +50,11 @@ Browser recovery holds recent working state separately from the database. The sa
 Use Library → Download current JSON for portable scene backups. For the whole library, stop the server and copy `data/scenes.sqlite`; retain the data folder when moving the installation. Do not run concurrent installations against a Dropbox-synchronised database. Browser recovery is not a durable backup and Git does not contain the library.
 
 `?test=1` uses a separate browser recovery key and an in-memory library. That library resets when the server restarts. Automated SQLite tests use temporary directories, never the user's library.
+
+### Hollow circular parts
+
+Optional `innerDiameter` (metres) turns a circular part into a hollow cylinder. It must be positive, at least 0.1 m below the outer diameter, and use a flat roof. Optional `topInnerDiameter` defaults to `innerDiameter`; `topDiameter` defaults to `width`. Each end must maintain at least 0.1 m diameter difference. Both inner and outer walls taper linearly. All four diameters scale together. The field survives JSON/SQLite storage, is included in the architectural brief and scales in part, collection and module rescaling. Existing circular parts without this field remain solid.
+
+Optional per-part `roofEnabled` defaults to true for legacy documents. False removes only the roof mesh/controls and roof height contribution; roof parameters remain available for re-enabling. The body stays capped. This state is included in JSON/SQLite and architectural briefs.
+
+Optional `subdivisions: {enabled, x, y, z}` stores body-preview segment counts (integers 1–64; circular x minimum 3). Circular axes mean around/height/radial. Counts do not change with physical scaling. Settings persist in JSON/SQLite; guide lines are not exported in reference images. No editable mesh is stored yet.

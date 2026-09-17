@@ -33,7 +33,7 @@ test("Move and Rotate cannot pick geometry editing handles", () => {
 test("selection modes isolate corners, edges and face handles", () => {
   assert.deepEqual(
     handles.filter((h) => canEditHandle("select", "vertices", h)),
-    ["vertex:0", "ridge:1"],
+    ["vertex:0", "ridge:1", "radius-top", "radius-bottom"],
   );
   assert.equal(canEditHandle("select", "edges", "face:0"), false);
   assert.equal(canEditHandle("select", "edges", "vertex:0"), false);
@@ -42,4 +42,18 @@ test("selection modes isolate corners, edges and face handles", () => {
   assert.equal(canEditHandle("select", "faces", "edge:0"), false);
   assert.equal(canEditHandle("select", "faces", "face:0"), true);
   assert.equal(canEditHandle("select", "faces", "radius-top"), true);
+});
+
+test("all four donut diameters remain accessible in every Select mode", () => {
+  for (const mode of ["vertices", "edges", "faces"] as SelectionMode[]) {
+    for (const handle of [
+      "radius-top",
+      "radius-bottom",
+      "radius-inner-top",
+      "radius-inner-bottom",
+    ]) {
+      assert.equal(canEditHandle("select", mode, handle), true);
+      assert.equal(canEditHandle("move", mode, handle), false);
+    }
+  }
 });

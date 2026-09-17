@@ -12,6 +12,8 @@ export type Part = {
   floors: number;
   floorHeight: number;
   roof: Roof;
+  roofEnabled?: boolean;
+  subdivisions?: { enabled: boolean; x: number; y: number; z: number };
   ridge: "width" | "depth";
   rise: number;
   highEdge: "front" | "back" | "left" | "right";
@@ -20,6 +22,8 @@ export type Part = {
   footprint?: [number, number][];
   shape?: "rectangle" | "circle";
   topDiameter?: number;
+  innerDiameter?: number;
+  topInnerDiameter?: number;
   baseY?: number;
   cornerHeights?: number[];
   cornerBases?: number[];
@@ -113,6 +117,8 @@ export function resizeModule(d: Plan, size: number, rescale: boolean): Plan {
     for (const p of n.parts) {
       if (p.wallHeight !== undefined) p.wallHeight *= r;
       if (p.topDiameter !== undefined) p.topDiameter *= r;
+      if (p.innerDiameter !== undefined) p.innerDiameter *= r;
+      if (p.topInnerDiameter !== undefined) p.topInnerDiameter *= r;
       if (p.baseY !== undefined) p.baseY *= r;
       if (p.cornerBases) p.cornerBases = p.cornerBases.map((n) => n * r);
       if (p.cornerHeights) p.cornerHeights = p.cornerHeights.map((n) => n * r);
@@ -236,6 +242,16 @@ export function validate(raw: unknown): Plan {
       !num(p.rotation, 0, 360) ||
       (p.shape !== undefined && !["rectangle", "circle"].includes(p.shape)) ||
       (p.topDiameter !== undefined && !num(p.topDiameter, 0.1, 500)) ||
+      (p.innerDiameter !== undefined &&
+        (p.shape !== "circle" ||
+          p.roof !== "flat" ||
+          !num(p.innerDiameter, 0.1, p.width - 0.1) ||
+          !num(
+            p.topInnerDiameter ?? p.innerDiameter,
+            0.1,
+            (p.topDiameter ?? p.width) - 0.1,
+          ))) ||
+      (p.topInnerDiameter !== undefined && p.innerDiameter === undefined) ||
       (p.baseY !== undefined && !num(p.baseY, 0, 500)) ||
       (p.cornerHeights !== undefined &&
         (!Array.isArray(p.cornerHeights) ||
@@ -258,6 +274,14 @@ export function validate(raw: unknown): Plan {
               !num(q[1], 0, 50) ||
               !num(q[2], -5, 5),
           ))) ||
+      (p.subdivisions !== undefined &&
+        (!p.subdivisions ||
+          typeof p.subdivisions.enabled !== "boolean" ||
+          ![p.subdivisions.x, p.subdivisions.y, p.subdivisions.z].every(
+            (n) => Number.isInteger(n) && n >= 1 && n <= 64,
+          ) ||
+          (p.shape === "circle" && p.subdivisions.x < 3))) ||
+      (p.roofEnabled !== undefined && typeof p.roofEnabled !== "boolean") ||
       !["gable", "lean-to", "flat"].includes(p.roof) ||
       !["width", "depth"].includes(p.ridge) ||
       !["front", "back", "left", "right"].includes(p.highEdge)
@@ -288,7 +312,7 @@ export function brief(d: Plan): string {
     )
     .join(
       "\n",
-    )}\nGroups: ${JSON.stringify(d.groups ?? [])}. Part memberships: ${JSON.stringify(d.parts.map((p) => ({ part: p.id, group: p.groupId ?? null })))}\n\n## Locked parts\n\n${d.parts.map((p) => `- ${p.name} (${p.role}, ID ${p.id}): shape ${p.shape ?? "rectangle"}; base elevation ${p.baseY ?? 0} m; centre X ${p.x}, Z ${p.z}; width ${p.width} × depth ${p.depth} m; ${p.shape === "circle" ? `cylinder bottom diameter ${p.width} m, top diameter ${p.topDiameter ?? p.width} m;` : ""} local rotation ${p.rotation}°; ${Number(estimatedFloors(p).toFixed(2))} estimated floors (floor height ${p.floorHeight} m); explicit eaves height ${height(p)} m; roof ${p.roof}, rise ${p.roof === "flat" ? 0 : p.rise} m, ridge along local ${p.ridge}, lean-to high edge ${p.highEdge}. Ridge endpoints (normalised local X, metres above eaves, normalised local Z): ${JSON.stringify(ridgeEnds(p))}. Corner wall heights: ${JSON.stringify(p.cornerHeights ?? [])}; corner base heights: ${JSON.stringify(p.cornerBases ?? [])}. Footprint normalised local X/Z corners: ${JSON.stringify(footprint(p))}. Materials: ${p.materials || "unspecified"}.`).join("\n")}\n\n## Artistic guidance\n\n${d.notes || "Follow the approved project art direction."}\n\n## Unspecified details\n\nDoors, windows, surface wear and dressing may be unspecified. Circular parts can represent chimneys; preserve every modelled part. Infer them conservatively without changing the locked structural volumes. No new extensions. Roof intersections are unmerged blockout geometry, not construction drawings.\n\n## Review warnings\n\n${
+    )}\nGroups: ${JSON.stringify(d.groups ?? [])}. Part memberships: ${JSON.stringify(d.parts.map((p) => ({ part: p.id, group: p.groupId ?? null })))}\n\n## Locked parts\n\n${d.parts.map((p) => `- ${p.name} (${p.role}, ID ${p.id}): shape ${p.shape ?? "rectangle"}; base elevation ${p.baseY ?? 0} m; centre X ${p.x}, Z ${p.z}; width ${p.width} × depth ${p.depth} m; ${p.shape === "circle" ? `cylinder ${p.innerDiameter !== undefined ? `with open bore bottom diameter ${p.innerDiameter} m, top diameter ${p.topInnerDiameter ?? p.innerDiameter} m; ` : ""}bottom diameter ${p.width} m, top diameter ${p.topDiameter ?? p.width} m;` : ""} local rotation ${p.rotation}°; ${Number(estimatedFloors(p).toFixed(2))} estimated floors (floor height ${p.floorHeight} m); explicit eaves height ${height(p)} m; roof ${p.roofEnabled === false ? "disabled (plain capped volume)" : p.roof}, rise ${p.roofEnabled === false || p.roof === "flat" ? 0 : p.rise} m, ridge along local ${p.ridge}, lean-to high edge ${p.highEdge}. Ridge endpoints (normalised local X, metres above eaves, normalised local Z): ${JSON.stringify(ridgeEnds(p))}. Corner wall heights: ${JSON.stringify(p.cornerHeights ?? [])}; corner base heights: ${JSON.stringify(p.cornerBases ?? [])}. Footprint normalised local X/Z corners: ${JSON.stringify(footprint(p))}. Materials: ${p.materials || "unspecified"}.`).join("\n")}\n\n## Artistic guidance\n\n${d.notes || "Follow the approved project art direction."}\n\n## Unspecified details\n\nDoors, windows, surface wear and dressing may be unspecified. Circular parts can represent chimneys; preserve every modelled part. Infer them conservatively without changing the locked structural volumes. No new extensions. Roof intersections are unmerged blockout geometry, not construction drawings.\n\n## Review warnings\n\n${
     warnings(d)
       .map((x) => "- " + x)
       .join("\n") || "No structural warnings."
@@ -422,11 +446,17 @@ export function insideFootprint(p: Part, x: number, z: number): boolean {
 }
 export const topY = (p: Part) =>
   baseY(p) +
-  Math.max(
-    height(p) + (p.roof === "flat" ? 0.12 : p.rise),
-    ...(p.cornerHeights ?? []).map((y) => y + (p.roof === "flat" ? 0.12 : 0)),
-    ...(p.roof === "gable" ? ridgeEnds(p).map((q) => height(p) + q[1]) : []),
-  );
+  (p.roofEnabled === false
+    ? Math.max(height(p), ...(p.cornerHeights ?? []))
+    : Math.max(
+        height(p) + (p.roof === "flat" ? 0.12 : p.rise),
+        ...(p.cornerHeights ?? []).map(
+          (y) => y + (p.roof === "flat" ? 0.12 : 0),
+        ),
+        ...(p.roof === "gable"
+          ? ridgeEnds(p).map((q) => height(p) + q[1])
+          : []),
+      ));
 export function partsTouch(a: Part, b: Part, tolerance = 0.02) {
   return (
     polygonsTouch(a, b, tolerance) &&
@@ -454,6 +484,8 @@ export function scalePart(source: Part, factor: number): Part {
     p[key] *= factor;
   if (p.wallHeight !== undefined) p.wallHeight *= factor;
   if (p.topDiameter !== undefined) p.topDiameter *= factor;
+  if (p.innerDiameter !== undefined) p.innerDiameter *= factor;
+  if (p.topInnerDiameter !== undefined) p.topInnerDiameter *= factor;
   if (p.cornerBases) p.cornerBases = p.cornerBases.map((y) => y * factor);
   if (p.cornerHeights) p.cornerHeights = p.cornerHeights.map((y) => y * factor);
   if (p.ridgeEnds)
@@ -616,4 +648,18 @@ export function scaleSelection(
     return q;
   });
   return next;
+}
+
+export type Primitive = "cube" | "cylinder" | "donut";
+export function primitive(kind: Primitive, moduleSize: number): Part {
+  const p = part(moduleSize);
+  p.name = kind === "donut" ? "Donut" : kind === "cube" ? "Cube" : "Cylinder";
+  p.width = p.depth = moduleSize;
+  p.floors = 1;
+  p.roof = "flat";
+  p.rise = 0;
+  p.materials = "";
+  if (kind !== "cube") p.shape = "circle";
+  if (kind === "donut") p.innerDiameter = moduleSize / 2;
+  return p;
 }

@@ -61,3 +61,11 @@ Terrain can be absent, one connected scene surface, or per collection. Convex en
 The export dialog controls terrain inclusion independently of viewport visibility. The ZIP contains a versioned plan, Markdown brief, manifest and nine clean 1400 × 1200 PNGs: front/back/left/right/top plus four isometric corners. Images use a shared orthographic scale and exclude editing handles, grid and guides. Top appears once.
 
 The blockout is structural authority for downstream artwork. Materials and atmosphere remain art-direction concerns. There is no direct AI generation, asset approval system or finished mesh export inside this tool.
+
+## Generic shape placement
+
+Add mode selects a cube, cylinder or hollow ring from `primitive()` in the model. The stage builds a disposable translucent preview outside the document, then commits a fresh part on click and returns to Faces selection. Placement samples the first surface hit, or the ground plane, with X/Z subdivision snapping. Preview geometry is cleared on cancellation, tool changes, pointer leave and reference capture.
+
+Hollow rings use connected annular surfaces with a real hole through wall and cap geometry; independent top/bottom inner and outer diameters define linear taper. They remain circular parts with an optional `innerDiameter`; diameter and height edits use the existing component/undo pipeline. Their outer footprint remains the approximation used for structures and terrain, so a part in the bore may be considered connected.
+
+X-ray is transient editor state: rebuild applies transparency to component materials and clears edge depth testing. Reference capture rebuilds opaque components, hides aids, then restores the previous X-ray state. Circular radius controls bypass Select submode filtering because circular parts do not expose footprint-corner vertices.

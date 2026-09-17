@@ -1,5 +1,6 @@
 import React from "react";
 const paths: Record<string, string> = {
+  add: "M12 4v16 M4 12h16",
   settings:
     "M9 3h6l1 3 3 1 2 5-2 5-3 1-1 3H9l-1-3-3-1-2-5 2-5 3-1 1-3z M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0",
   select: "M5 3l14 10-7 1-3 7-4-18z",

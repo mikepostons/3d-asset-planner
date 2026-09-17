@@ -7,6 +7,8 @@ export function canEditHandle(
   if (tool === "move") return kind === "move";
   if (tool === "rotate") return kind === "rotate";
   if (tool !== "select") return false;
+  // Circular parts have no editable corner vertices; keep their diameter controls accessible.
+  if (kind.startsWith("radius-")) return true;
   if (mode === "vertices")
     return kind.startsWith("vertex:") || kind.startsWith("ridge:");
   if (mode === "edges")

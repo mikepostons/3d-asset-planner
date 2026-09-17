@@ -133,3 +133,21 @@ The library lists saved projects even when empty, with scene counters and confir
 ## Developer documentation
 
 See [docs](docs/README.md) for architecture, data/storage contracts, completed features, development workflow and [dated devlogs](docs/devlogs/README.md). Documentation is updated alongside meaningful development changes, as required by [AGENTS.md](AGENTS.md).
+
+## Add generic shapes
+
+Choose **Add**, then select **Cube**, **Cylinder** or **Donut (hollow cylinder)**. A translucent preview follows the cursor; click the ground or an existing surface to place one part. Placement snaps horizontally to grid subdivisions. Escape cancels; placement returns to Select → Faces. Initial dimensions use the current major module.
+
+Donut is a ring with an open bore and independently tapered inner and outer walls. In Faces mode, use the height handle, outer and amber inner-diameter handles at both ends, or enter Height and the four end diameters in Component Settings. Diameters retain at least 0.1 m difference. Uniform scaling preserves the bore. Structure contact and generated terrain use their outer footprint.
+
+Undo/redo are in the header. Floor guides and Terrain sit together immediately left of the 2D/3D view controls.
+
+**X-ray** beside Terrain makes component surfaces translucent so hidden surfaces are easier to inspect. Reference exports remain solid. Donut diameter handles are labelled and available in all Select modes, including Vertices; use Faces for the height handle.
+
+Hover a handle to see its name above/right of the cursor. Handle tooltips fit their text and disappear when you leave or begin dragging.
+
+In **Select → Edges**, hover anywhere along a straight wall edge to highlight its full length, then drag that edge. Midpoint targeting is no longer required; axis arrows remain available for constrained edits. Uneven top/base edges follow their actual endpoints.
+
+Component Settings uses collapsible Organisation/aspect, Dimensions, Position, Floors/walls, Elevation/rotation, Roof and Materials sections. Duplicate/Delete stay in the footer while properties scroll. Disable **Roof enabled** to remove the roof mesh and its handles, leaving a plain capped volume; re-enable to restore the saved roof settings. The choice is saved and respected by reference exports.
+
+**Component Settings → Subdivisions** enables an amber body-surface preview. Rectangular parts use local X/Y/Z segment counts; circular parts use Around, Height and Radial/wall thickness counts. The estimate counts surface patches, not final triangles. Roofs are excluded. This first stage does not add editable vertices or unwrap UVs; see the development plan for conversion/export.
