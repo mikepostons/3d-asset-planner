@@ -1,0 +1,13 @@
+node_modules/
+dist/
+.DS_Store
+
+data/
+
+# Local credentials and database backups
+.env
+.env.*
+*.sqlite
+*.sqlite-*
+*.db
+*.db-*
