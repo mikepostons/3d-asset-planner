@@ -1,3 +1,11 @@
+import {FoundationControls} from "./FoundationControls";
+import {foundationDefaults} from "./foundations";
+import {applyPreparedUVs,preparationKey,preparationStatus,cleanerDiagnostics} from "./model-cleaner";
+import { ModelCleaner } from "./ModelCleaner";
+import type { Group } from "three";
+import { encodeGLB, disposeExport } from "./model-export";
+import { defaultRoofDetails } from "./roof-details";
+import { StoneDressingControls } from "./StoneDressingControls";
 import { ArchitecturalControls } from "./ArchitecturalControls";
 import { reconcileThresholds, defaultDetails } from "./architectural-details";
 import { duplicateOpenings } from "./opening-groups";
@@ -250,6 +258,14 @@ type SavedReference = {
 function App() {
   const [d, setD] = useState<Plan>(initial),
     [selected, setSelected] = useState<string | null>(null),
+    [activeCluster, setActiveCluster] = useState<string | null>(null),
+    [cleanerRoot,setCleanerRoot] = useState<Group | null>(null),
+    [exportHub,setExportHub] = useState(false),
+    [completeExport,setCompleteExport] = useState(false),
+    [modelDialog, setModelDialog] = useState(false),
+    [modelScope, setModelScope] = useState("scene"),
+    [modelTerrain, setModelTerrain] = useState(false),
+    [modelCentre, setModelCentre] = useState(true),
     [tool, setTool] = useState<Tool>("select"),
     [activeFace, setActiveFace] = useState<{
       partId: string;
@@ -299,6 +315,7 @@ function App() {
     [libraryError, setLibraryError] = useState(""),
     [settingsTab, setSettingsTab] = useState("part"),
     [sceneDraft, setSceneDraft] = useState<Plan | null>(null),
+    [sceneSettingsTab, setSceneSettingsTab] = useState("general"),
     [revisionDraft, setRevisionDraft] = useState(1);
   const host = useRef<HTMLDivElement>(null),
     stage = useRef<Stage | null>(null),
@@ -362,18 +379,13 @@ function App() {
       stage.current.xray = xray;
       stage.current.activeFace =
         activeFace?.partId === selected ? activeFace : null;
+      stage.current.selectedCluster = activeCluster;
       stage.current.selectedOpening = activeOpening;
       stage.current.selectedOpenings = openingSelection;
       stage.current.openingKind = openingKind;
       stage.current.update(d, selected, tool);
     }
-    try {
-      localStorage.setItem(STORE, JSON.stringify(d));
-    } catch {
-      setMessage(
-        "Browser recovery storage is unavailable. Save your scene locally to keep your work.",
-      );
-    }
+
   }, [
     d,
     selected,
@@ -387,8 +399,43 @@ function App() {
     activeFace,
     activeOpening,
     openingSelection,
+    activeCluster,
     openingKind,
   ]);
+  useEffect(() => {
+    const saveRecovery = () => {
+      try { localStorage.setItem(STORE, JSON.stringify(live.current)); }
+      catch { setMessage("Browser recovery storage is unavailable. Save your scene locally to keep your work."); }
+    };
+    const timer = window.setTimeout(saveRecovery, 500);
+    const onVisibility = () => { if (document.visibilityState === "hidden") saveRecovery(); };
+    window.addEventListener("pagehide", saveRecovery);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => { window.clearTimeout(timer); window.removeEventListener("pagehide",saveRecovery); document.removeEventListener("visibilitychange",onVisibility); };
+  }, [d]);
+  async function exportModel() {
+    setBusy(true);
+    let result: ReturnType<Stage["modelExport"]> | undefined;
+    try {
+      const parts=modelScope==="selection"?selectedParts(d,selected):d.parts;
+      if(!parts.length)throw Error("Select a component, structure or group first.");
+      result=stage.current!.modelExport(parts,modelTerrain,modelCentre);
+      applyPreparedUVs(result.root,d);
+      result.report.missingUVs=cleanerDiagnostics(result.root).missingUVs;
+      result.report.warnings=result.report.warnings.filter(w=>!w.includes("no UV mapping"));
+      if(result.report.missingUVs)result.report.warnings.push(`${result.report.missingUVs} meshes lack UVs.`);
+      const glb=await encodeGLB(result.root);
+      const zip=new JSZip();
+      const name=(d.name||"asset").replace(/[^a-zA-Z0-9_-]+/g,"-");
+      zip.file(name+".glb",glb);
+      zip.file("geometry-report.json",JSON.stringify(result.report,null,2));
+      zip.file("source-plan.json",JSON.stringify({...d,parts},null,2));
+      zip.file("README.txt","Untextured structural model. Units: metres, Y up. See geometry-report.json for source origin and geometry warnings. Material descriptions are placeholders, not textures. Original procedural scene is preserved in source-plan.json.");
+      download(await zip.generateAsync({type:"blob"}),name+"-3d.zip");
+      setMessage(`3D export downloaded: ${result.report.meshes} meshes, ${result.report.triangles.toLocaleString()} triangles, ${result.report.materials} materials. Includes geometry report and current saved UV preparation. Geometry cleanup is not yet complete.`);
+      setModelDialog(false);
+    } catch(e){setMessage(String(e));} finally {if(result)disposeExport(result.root);setBusy(false);}
+  }
   function undo() {
     const old = history.current.pop();
     if (old) {
@@ -442,7 +489,7 @@ function App() {
         busy ||
         sceneDraft ||
         moduleDialog ||
-        exportDialog ||
+        exportHub || modelDialog || !!cleanerRoot || exportDialog ||
         showHelp ||
         libraryModal
       )
@@ -639,7 +686,7 @@ function App() {
   function requestSwitch(action: PendingScene) {
     setLibraryError("");
     setLibraryOpen(false);
-    if (dirty) setPendingScene(action);
+    if (dirty || action.kind === "new") setPendingScene(action);
     else void switchScene(action);
   }
   async function open(f: File) {
@@ -711,6 +758,9 @@ function App() {
               wallThickness: p.wallThickness ?? 0.4,
               openings: p.openings ?? [],
               architecturalDetails: p.architecturalDetails ?? null,
+              stoneClusters: p.stoneClusters ?? null,
+              stoneBands: p.stoneBands ?? null,
+              roofDetails: p.roofDetails ?? null,
             })),
             materialAssignments: materialMetadata(exportPlan),
             terrain: exportPlan.terrain,
@@ -720,19 +770,28 @@ function App() {
             terrainPatches: terrainPatches(exportPlan),
             views: referenceViews,
             notes:
-              "Structural blockout reference images. Terrain footprints are included in this manifest; no production mesh is exported.",
+              completeExport ? "Includes untextured structural GLB, geometry report and reference images; not a finished game asset." : "Structural blockout reference images. Terrain footprints are included; no mesh is exported.",
             warnings: warnings(d),
           },
           null,
           2,
         ),
       );
+      if(completeExport){
+        const model=stage.current.modelExport(d.parts,includeTerrain,true);
+        applyPreparedUVs(model.root,d);
+        model.report.missingUVs=cleanerDiagnostics(model.root).missingUVs;
+        model.report.warnings=model.report.warnings.filter(w=>!w.includes("no UV mapping"));
+        if(model.report.missingUVs)model.report.warnings.push(`${model.report.missingUVs} meshes lack UVs.`);
+        try {zip.file(`${prefix}.glb`,await encodeGLB(model.root));zip.file("geometry-report.json",JSON.stringify(model.report,null,2));}
+        finally {disposeExport(model.root);}
+      }
       download(
         await zip.generateAsync({ type: "blob" }),
-        `${prefix}-reference-pack-${v}.zip`,
+        `${prefix}-${completeExport?"complete":"reference"}-pack-${v}.zip`,
       );
       setMessage(
-        "Reference pack downloaded: plan, brief, nine views and manifest.",
+        completeExport ? "Complete package downloaded: GLB, geometry report and references." : "Reference pack downloaded: plan, brief, nine views and manifest.",
       );
     } catch (e) {
       setMessage("Export failed: " + (e as Error).message);
@@ -778,6 +837,13 @@ function App() {
       : `${counted(d.parts.length, "part")} · ${counted(d.groups?.length ?? 0, "group")} · Select a component to inspect it`;
   function draftPatch(values: Partial<Plan>) {
     setSceneDraft((old) => (old ? { ...old, ...values } : old));
+  }
+  function foundationSettings(){
+    const parts=selectedParts(d,selected);
+    const structure=sceneStructures(d).find(s=>s.parts.some(p=>parts.some(q=>q.id===p.id)));
+    if(!structure || selected?.startsWith("group:"))return null;
+    const override=d.structureFoundations?.[structure.id];
+    return <details className="part-section"><summary>Structure foundation</summary><label className="settings-check"><input type="checkbox" checked={!!override} onChange={e=>{const settings={...d.structureFoundations};if(e.target.checked)settings[structure.id]={...(d.foundation??foundationDefaults)};else delete settings[structure.id];patch({structureFoundations:settings});}}/> Override scene foundations</label>{override?<FoundationControls value={override} onChange={value=>patch({structureFoundations:{...d.structureFoundations,[structure.id]:value}})}/>:<p className="micro">Uses scene foundation settings. Applies to all connected parts in this structure.</p>}</details>;
   }
   function aspectSettings() {
     const owner = aspectOwner(d, selected);
@@ -856,7 +922,7 @@ function App() {
         inert={
           !!sceneDraft ||
           moduleDialog ||
-          exportDialog ||
+          exportHub || modelDialog || !!cleanerRoot || exportDialog ||
           showHelp ||
           libraryModal
         }
@@ -866,25 +932,35 @@ function App() {
           <div>ASSET DESIGNER</div>
         </div>
         <div className="document">
+          <button className="scene-new-button" aria-label="New scene" title="New scene" onClick={() => requestSwitch({ kind: "new" })}><ToolIcon name="new" /></button>
           <input
             aria-label="Scene name"
             value={d.name}
             onChange={(e) => patch({ name: e.target.value })}
           />
           <button
-            className={"save-status " + (!dirty ? "is-saved" : "")}
-            title="Save or change this scene’s project"
-            onClick={() => void showSave()}
-            aria-live="polite"
+            aria-label="Settings"
+            title="Settings"
+            className="scene-settings-button"
+            onClick={() => {
+              setNewModule(d.moduleSize);
+              setNewSubdivision(d.subdivision);
+              setRescaleSettings(false);
+              setSaveProject(
+                savedReference?.id === d.id
+                  ? (savedReference.projectId ?? "")
+                  : "",
+              );
+              setLibraryError("");
+              setModuleDialog(true);
+              libraryRequest<Project[]>("/projects")
+                .then(setProjects)
+                .catch((e) => setLibraryError(String(e)));
+            }}
           >
-            {saving
-              ? "Saving…"
-              : !dirty
-                ? "● Saved locally"
-                : savedReference?.id === d.id
-                  ? "● Unsaved changes"
-                  : "○ Not saved"}
+            <ToolIcon name="settings" />
           </button>
+
         </div>
         <nav>
           <div className="undo">
@@ -904,41 +980,12 @@ function App() {
             </button>
           </div>
 
-          <button
-            aria-label="Settings"
-            onClick={() => {
-              setNewModule(d.moduleSize);
-              setNewSubdivision(d.subdivision);
-              setRescaleSettings(false);
-              setSaveProject(
-                savedReference?.id === d.id
-                  ? (savedReference.projectId ?? "")
-                  : "",
-              );
-              setLibraryError("");
-              setModuleDialog(true);
-              libraryRequest<Project[]>("/projects")
-                .then(setProjects)
-                .catch((e) => setLibraryError(String(e)));
-            }}
-          >
-            <ToolIcon name="settings" /> <span>Settings</span>
-          </button>
-          <button aria-label="Help" onClick={() => setShowHelp(true)}>
-            ?
-          </button>
-          <button onClick={() => requestSwitch({ kind: "new" })}>New</button>
-          <button onClick={() => setLibraryOpen(true)}>Library</button>
-          <button onClick={save} disabled={saving}>
-            {saving ? "Saving…" : "Save scene"}
-          </button>
-          <button
-            className="primary"
-            disabled={busy || !d.parts.length}
-            onClick={() => setExportDialog(true)}
-          >
-            {busy ? "Exporting…" : "Export references ↗"}
-          </button>
+
+
+          <button aria-label="Library" title="Library" onClick={() => setLibraryOpen(true)}><ToolIcon name="library" /></button>
+          <button className={"scene-save " + (dirty ? "unsaved":"saved")} onClick={save} disabled={saving} title={dirty?"Unsaved changes":"All changes saved"}><ToolIcon name="save" />{saving?"Saving…":dirty?"Save scene":"Saved"}</button>
+          <button disabled={busy || !d.parts.length} onClick={()=>{try{const parts=selectedParts(d,selected);const root=stage.current!.modelExport(parts.length?parts:d.parts,false,true).root;applyPreparedUVs(root,d);setCleanerRoot(root);}catch(e){setMessage(String(e));}}}><ToolIcon name="cleaner" />Cleaner</button>
+          <button className="primary" disabled={busy || !d.parts.length} onClick={()=>setExportHub(true)}><ToolIcon name="export" />{busy?"Exporting…":"Export"}</button>
         </nav>
         <input
           hidden
@@ -953,7 +1000,7 @@ function App() {
         inert={
           !!sceneDraft ||
           moduleDialog ||
-          exportDialog ||
+          exportHub || modelDialog || !!cleanerRoot || exportDialog ||
           showHelp ||
           libraryModal
         }
@@ -1252,7 +1299,7 @@ function App() {
               <i /> {hint}
             </span>
             <span>
-              Orbit: drag empty space · Pan: right drag · Zoom: scroll
+              <button className="footer-help" onClick={()=>setShowHelp(true)}><ToolIcon name="help" />Help</button> Orbit: drag empty space · Pan: right drag · Zoom: scroll
             </span>
           </div>
           <div className="handle-key">
@@ -1280,6 +1327,7 @@ function App() {
             <button
               className={settingsTab === "building" ? "chosen" : ""}
               onClick={() => {
+                setSceneSettingsTab("general");
                 setSceneDraft(clone(d));
                 setRevisionDraft(revision);
               }}
@@ -1342,7 +1390,7 @@ function App() {
                     }}
                   />
                 </label>
-                {aspectSettings()}
+                {aspectSettings()}{foundationSettings()}
                 {selected.startsWith("group:") && (
                   <button
                     onClick={() => {
@@ -1371,7 +1419,7 @@ function App() {
                 />
                 <details className="part-section">
                   <summary>Organisation & aspect</summary>
-                  {aspectSettings()}
+                  {aspectSettings()}{foundationSettings()}
                   <label className="field">
                     Group
                     <select
@@ -1836,6 +1884,20 @@ function App() {
                     />
                   </details>
                 )}
+                <StoneDressingControls
+                  selectedCluster={activeCluster}
+                  onSelectCluster={setActiveCluster}
+                  sceneParts={d.parts}
+                  part={p}
+                  onChange={update}
+                  selectedFace={
+                    p.shape !== "circle" &&
+                    selectionMode === "faces" &&
+                    activeFace?.partId === p.id
+                      ? activeFace.index
+                      : undefined
+                  }
+                />
                 <details className="part-section" open>
                   <summary>Dimensions</summary>
                   <div className="pair">
@@ -2053,6 +2115,27 @@ function App() {
                   </label>
                   {p.roofEnabled !== false && (
                     <>
+                      {p.shape !== "circle" && <details className="part-section">
+                        <summary>Roof construction & trim</summary>
+                        <label className="settings-check"><input type="checkbox" checked={!!p.roofDetails} onChange={e=>update({roofDetails:e.target.checked ? defaultRoofDetails():undefined})}/> Enable roof detailing</label>
+                        {p.roofDetails && <>
+                          <p className="micro">Thickness is vertical. End 1 / 2 follow the negative / positive ridge axis; lean-to ends follow its slope direction.</p>
+                          <div className="pair">{([["thickness","Roof thickness"],["sides","Side overhangs"],["start","End 1 overhang"],["end","End 2 overhang"]] as const).map(([key,label])=><Num key={key} label={label} value={p.roofDetails![key]} min={key==="thickness"?.01:0} max={10} step={.01} onChange={n=>update({roofDetails:{...p.roofDetails!,[key]:n}})}/>)}</div>
+                          <label className="settings-check"><input type="checkbox" checked={p.roofDetails.fascia} onChange={e=>update({roofDetails:{...p.roofDetails!,fascia:e.target.checked}})}/> Fascia boards</label>
+                          {p.roofDetails.fascia && (["sideFascia","endFascia"] as const).map(key=>{
+                            const f=p.roofDetails![key]??{height:p.roofDetails!.fasciaHeight,depth:p.roofDetails!.fasciaDepth,inset:p.roofDetails!.fasciaInset??0,drop:0};
+                            return <details className="part-section" key={key}><summary>{key==="sideFascia"?"Side fascia boards":"End fascia boards"}</summary><div className="pair">{([["height","Board height"],["depth","Board thickness"],["inset","Inset from roof edge"],["drop","Drop below underside"]] as const).map(([field,label])=><Num key={field} label={label} value={f[field]} min={field==="height"||field==="depth"?.01:0} max={10} step={.01} onChange={n=>update({roofDetails:{...p.roofDetails!,[key]:{...f,[field]:n}}})}/>)}</div>{key==="sideFascia" && <><Num label="Length offset at each end" value={p.roofDetails!.sideFascia?.lengthOffset??0} min={-10} max={10} step={.01} onChange={n=>update({roofDetails:{...p.roofDetails!,sideFascia:{...f,lengthOffset:n}}})}/><p className="micro">Positive extends both ends; negative shortens them. A fully shortened board is hidden.</p></>}</details>;
+                          })}
+                          {p.roof==="gable" && <details className="part-section"><summary>Ridge beam</summary><label className="settings-check"><input type="checkbox" checked={p.roofDetails.ridgeBeam??false} onChange={e=>update({roofDetails:{...p.roofDetails!,ridgeBeam:e.target.checked}})}/> Add ridge beam</label>{p.roofDetails.ridgeBeam && <><p className="micro">Extensions are measured beyond the roof ridge ends. Set either extension to zero for no projection at that end.</p><div className="pair">{([["beamWidth","Beam width",.2],["beamHeight","Beam height",.25],["beamStart","End 1 extension",0],["beamEnd","End 2 extension",0],["beamDrop","Drop below ridge",.15]] as const).map(([key,label,fallback])=><Num key={key} label={label} value={p.roofDetails![key]??fallback} min={key==="beamWidth"||key==="beamHeight"?.01:0} max={10} step={.01} onChange={n=>update({roofDetails:{...p.roofDetails!,[key]:n}})}/>)}</div></>}</details>}
+
+                          {p.roof === "gable" && <details className="part-section"><summary>Gable ends</summary>
+                            <label className="settings-check"><input type="checkbox" checked={p.roofDetails.gableSeparate ?? false} onChange={e=>update({roofDetails:{...p.roofDetails!,gableSeparate:e.target.checked,gableEnd:p.roofDetails!.gableEnd??p.roofDetails!.gableStart??"wall",gableEndMaterial:p.roofDetails!.gableEndMaterial??p.roofDetails!.gableStartMaterial}})}/> Set each end separately</label>
+                            {(p.roofDetails.gableSeparate ? [0,1]:[0]).map(end=>{const key=end?"gableEnd":"gableStart",materialKey=end?"gableEndMaterial":"gableStartMaterial";return <div key={end}><label className="field">{p.roofDetails!.gableSeparate?`End ${end+1}`:"Both ends"}<select value={p.roofDetails![key]??"wall"} onChange={e=>update({roofDetails:{...p.roofDetails!,[key]:e.target.value as "wall"|"hidden"|"material"}})}><option value="hidden">Hidden</option><option value="wall">Extend wall</option><option value="material">Separate material</option></select></label>{p.roofDetails![key]==="material" && <label className="field">Gable material<textarea value={p.roofDetails![materialKey]??"Gable cladding"} onChange={e=>update({roofDetails:{...p.roofDetails!,[materialKey]:e.target.value}})}/></label>}</div>})}
+                          </details>}
+                          {p.roof === "gable" && <><label className="settings-check"><input type="checkbox" checked={p.roofDetails.ridgeCap} onChange={e=>update({roofDetails:{...p.roofDetails!,ridgeCap:e.target.checked}})}/> Ridge cap</label>
+                          {p.roofDetails.ridgeCap && <div className="pair">{([["capWidth","Cap width"],["capHeight","Cap thickness"]] as const).map(([key,label])=><Num key={key} label={label} value={p.roofDetails![key]} min={.01} max={10} step={.01} onChange={n=>update({roofDetails:{...p.roofDetails!,[key]:n}})}/>)}</div>}</>}
+                        </>}
+                      </details>}
                       <label className="field">
                         Roof shape
                         <select
@@ -2324,24 +2407,26 @@ function App() {
             className="modal"
             role="dialog"
             aria-modal="true"
-            aria-label="Unsaved scene"
+            aria-label={pendingScene.kind === "new" ? "Create new scene" : "Unsaved scene"}
           >
-            <h2>Save this scene first?</h2>
+            <h2>{pendingScene.kind === "new" ? "Close this scene and create a new one?" : "Save this scene first?"}</h2>
             <p>
-              “{d.name}” has unsaved changes. Save them before{" "}
               {pendingScene.kind === "new"
-                ? "starting a blank scene"
-                : "opening another scene"}
-              .
+                ? `Create a blank scene after closing “${d.name}”? ${dirty ? "Save your changes before continuing, or continue without saving." : "Your current scene is saved."}`
+                : `“${d.name}” has unsaved changes. Save them before opening another scene.`}
             </p>
             {libraryError && <p role="alert">{libraryError}</p>}
             <div className="save-actions">
-              <button onClick={() => setPendingScene(null)}>Cancel</button>
-              <button onClick={() => void switchScene(pendingScene)}>
-                Discard & continue
+              <button disabled={saving || switching} onClick={() => setPendingScene(null)}>Cancel</button>
+              <button disabled={saving || switching} onClick={() => void switchScene(pendingScene)}>
+                {dirty ? "Continue without saving" : "Continue"}
               </button>
-              <button className="primary" onClick={() => void showSave()}>
-                Save & continue
+              <button className="primary" disabled={saving || switching} onClick={async () => {
+                if (savedReference?.id === d.id) {
+                  if (await persist()) await switchScene(pendingScene);
+                } else await showSave();
+              }}>
+                {saving ? "Saving…" : "Save & continue"}
               </button>
             </div>
           </section>
@@ -2441,7 +2526,11 @@ function App() {
             aria-label="Scene settings"
           >
             <h2>Scene settings</h2>
-            <div>
+            <div className="scene-settings-tabs" role="tablist" aria-label="Scene settings sections">
+              {[["general","General"],["terrain","Terrain"],["foundations","Foundations"],["export","Export"]].map(([id,label])=><button key={id} id={`scene-tab-${id}`} role="tab" aria-selected={sceneSettingsTab===id} aria-controls={`scene-panel-${id}`} onClick={()=>setSceneSettingsTab(id)}>{label}</button>)}
+            </div>
+            <div className="scene-settings-body" role="tabpanel" id={`scene-panel-${sceneSettingsTab}`} aria-labelledby={`scene-tab-${sceneSettingsTab}`}>
+              {sceneSettingsTab==="general" && <>
               <label className="field">
                 Scene front
                 <select
@@ -2462,6 +2551,17 @@ function App() {
                   ))}
                 </select>
               </label>
+              <label className="field">
+                Scene notes
+                <textarea
+                  value={sceneDraft.notes}
+                  placeholder="Purpose, condition, architectural details…"
+                  onChange={(e) => draftPatch({ notes: e.target.value })}
+                />
+              </label>
+              </>}
+              {sceneSettingsTab==="foundations" && <FoundationControls value={sceneDraft.foundation} onChange={foundation=>draftPatch({foundation})}/>}
+              {sceneSettingsTab==="terrain" && <>
               <label className="field">
                 Terrain intent
                 <select
@@ -2526,14 +2626,8 @@ function App() {
                 value={sceneDraft.terrainMaterial}
                 onChange={(terrainMaterial) => draftPatch({ terrainMaterial })}
               />
-              <label className="field">
-                Scene notes
-                <textarea
-                  value={sceneDraft.notes}
-                  placeholder="Purpose, condition, architectural details…"
-                  onChange={(e) => draftPatch({ notes: e.target.value })}
-                />
-              </label>
+              </>}
+              {sceneSettingsTab==="export" && <>
               <Num
                 label="Export version"
                 value={revisionDraft}
@@ -2551,8 +2645,9 @@ function App() {
                   ))}
                 </div>
               )}
+              </>}
             </div>
-            <div className="pair">
+            <div className="pair scene-settings-footer">
               <button onClick={() => setSceneDraft(null)}>Cancel</button>
               <button
                 className="primary"
@@ -2574,9 +2669,9 @@ function App() {
             className="modal"
             role="dialog"
             aria-modal="true"
-            aria-label="Export reference options"
+            aria-label={completeExport ? "Export complete package options" : "Export reference options"}
           >
-            <h2>Export scene references</h2>
+            <h2><ToolIcon name="package" /> {completeExport ? "Export complete package" : "Export scene references"}</h2>
             <p>
               Nine images at matching scale: front, back, left, right, top-down,
               and an isometric view from each of the four corners.
@@ -2630,7 +2725,7 @@ function App() {
                 Cancel
               </button>
               <button disabled={busy || !d.parts.length} onClick={pack}>
-                {busy ? "Exporting…" : "Export reference pack"}
+                <ToolIcon name="package" /> {busy ? "Exporting…" : completeExport ? "Export complete package" : "Export reference pack"}
               </button>
             </div>
           </section>
@@ -2644,6 +2739,13 @@ function App() {
           </button>
         </div>
       )}
+      {cleanerRoot && <ModelCleaner root={cleanerRoot} prepared={preparationStatus(d,(selectedParts(d,selected).length?selectedParts(d,selected):d.parts).map(p=>p.id)) && new Set((selectedParts(d,selected).length?selectedParts(d,selected):d.parts).map(p=>d.preparedUVs?.[p.id]?.metresPerTile)).size===1} initialScale={d.preparedUVs?.[(selectedParts(d,selected)[0]??d.parts[0])?.id]?.metresPerTile??1} onSave={async scale=>{const parts=selectedParts(d,selected);const next=clone(live.current);next.preparedUVs={...next.preparedUVs};for(const p of parts.length?parts:d.parts)next.preparedUVs[p.id]={sourceKey:preparationKey(next),metresPerTile:scale};commit(next);return await persist(next.name,undefined,next);}} onClose={()=>setCleanerRoot(null)}/>}
+      {exportHub && <div className="modal-backdrop"><section className="modal export-hub" role="dialog" aria-modal="true" aria-label="Export"><h2><ToolIcon name="export" /> Export</h2><p>References come directly from your scene. Model exports automatically use saved, up-to-date Cleaner UVs.</p>{!preparationStatus(d,d.parts.map(p=>p.id)) && <p className="export-warning" role="status">Some components have not been prepared in Cleaner, or their geometry has changed. You can export now, but those components will use their original UVs.</p>}<div className="export-grid">
+        <button onClick={()=>{setCompleteExport(false);setExportHub(false);setExportDialog(true);}}><ToolIcon name="package" /><strong>Export Reference Package</strong><span>Nine views, source plan, brief and manifest.</span></button>
+        <button onClick={()=>{setExportHub(false);setModelDialog(true);}}><ToolIcon name="export" /><strong>Export Model</strong><span>Structural GLB with scope, terrain and origin options.</span></button>
+        <button onClick={()=>{setCompleteExport(true);setExportHub(false);setExportDialog(true);}}><ToolIcon name="package" /><strong>Export Complete Package</strong><span>Scene GLB, geometry report and all reference files. Includes saved UV preparation where current. No textures.</span></button>
+      </div><button className="cleaner-close" aria-label="Close Export" title="Close Export" onClick={()=>setExportHub(false)}>×</button></section></div>}
+      {modelDialog && <div className="modal-backdrop"><section className="modal" role="dialog" aria-modal="true" aria-label="Export 3D model"><h2>Export 3D model</h2><p>GLB model with material placeholders, saved UV preparation and a geometry report.</p>{!preparationStatus(d,(modelScope==="selection"?selectedParts(d,selected):d.parts).map(p=>p.id)) && <p className="export-warning">This selection has missing or outdated Cleaner preparation. Export will retain original UVs for those parts.</p>}<label className="field">Export scope<select value={modelScope} onChange={e=>setModelScope(e.target.value)}><option value="scene">Whole scene</option><option value="selection" disabled={!selectedParts(d,selected).length}>Selected component / structure / group</option></select></label><label className="settings-check"><input type="checkbox" checked={modelTerrain} onChange={e=>setModelTerrain(e.target.checked)}/> Include configured terrain</label><label className="settings-check"><input type="checkbox" checked={modelCentre} onChange={e=>setModelCentre(e.target.checked)}/> Centre origin at the base of the exported structures</label><p className="micro">Separate named parts are preserved. Editor guides and selection highlights are excluded.</p><button disabled={busy} onClick={()=>setModelDialog(false)}>Cancel</button><button className="primary" disabled={busy} onClick={exportModel}>{busy?"Exporting…":"Download GLB package"}</button></section></div>}
       {moduleDialog && (
         <div className="modal-backdrop">
           <section

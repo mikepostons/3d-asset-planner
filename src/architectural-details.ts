@@ -178,9 +178,11 @@ export function architecturalGeometry(p: Part) {
   const result: {
     geometry: T.BufferGeometry;
     name: string;
+    openingId?: string;
     material: string;
   }[] = [];
   if (p.shape === "circle") return result;
+  let openingId: string | undefined;
   const stone = (
     face: number,
     x: number,
@@ -215,9 +217,10 @@ export function architecturalGeometry(p: Part) {
       a.setXYZ(i, q.x, q.y, q.z);
     }
     g.computeVertexNormals();
-    result.push({ geometry: g, name, material });
+    result.push({ geometry: g, name, material, openingId });
   };
   for (const o of p.openings ?? []) {
+    openingId=o.id;
     const v = openingDetails(p, o);
     if (!v?.enabled) continue;
     if (v.jambs && o.kind !== "circle-window") {
@@ -379,6 +382,7 @@ export function architecturalGeometry(p: Part) {
               ? "Circular surround stone"
               : "Arch stone",
           material: v.material,
+          openingId,
         });
         if (key) index++;
       }
@@ -406,6 +410,7 @@ export function architecturalGeometry(p: Part) {
         v.cillMaterial,
       );
   }
+  openingId=undefined;
   const v = p.architecturalDetails;
   if (v?.enabled && v.quoins)
     for (let corner = 0; corner < 4; corner++) {

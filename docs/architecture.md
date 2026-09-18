@@ -125,3 +125,48 @@ extend along both adjoining wall directions. One mesh wraps each corner/course;
 alternating long and half-length sides produce the rotated bond. Seed variation
 is shared across both faces of each stone. Opening clearance suppresses the whole
 block when either side conflicts.
+
+stone-dressing.ts performs seeded wall-local cluster sampling with bounded retries,
+conservative opening/surround exclusions and intra-cluster spacing. Anchors depend
+only on the component seed, cluster ID and cluster seed. Whole-patch candidates are scored for separation; an entire patch is omitted
+when no clear placement fits. Rounded stone geometry maps
+through wall frames or the tapered cylinder outer surface. No roof/internal
+surface scattering. End bands use annular sectors; a chord correction preserves
+the donut bore at low segment counts. Optional solid centre meshes apply only
+to cylinders. These derived meshes are children of the part in the solids group,
+so transforms, X-ray and reference captures include them.
+
+Cluster placement receives all scene parts. It builds temporary transformed
+body/roof meshes with bounding-box rejection and ray-parity point containment.
+A grid of samples across each proposed stone's footprint/projection excludes
+covered wall regions. Temporary geometry/materials are disposed after placement.
+The controls and viewport use the same scene-aware calculation.
+
+Curved cluster coordinates store angles as mid-radius arc lengths. Row offsets
+and stone geometry use the radius at their own height to preserve physical widths;
+separation uses the smaller of the two local radii across the circular seam.
+
+roof-details.ts derives a closed roof skin from upper triangles of base roof
+geometry, adds perimeter fascia and a gable ridge beam, and merges those meshes
+for the standard roof rendering/material path. Disabled roofs bypass detailing.
+
+Material-only edits update Stage.plan without reconstructing geometry; geometry-key.ts
+excludes descriptive material fields while retaining dimensions and display state.
+StoneDressingControls memoizes placement by geometry content. Recovery writes are
+debounced 500 ms and flushed on pagehide/hidden visibility.
+
+model-export.ts produces isolated mesh-only export objects and GLB encoding with
+GLTFExporter. Stage.modelExport temporarily builds the chosen part subset and then
+restores the live viewport before asynchronous serialization. Export copies own
+geometry/materials and dispose them after encoding. The source plan is unchanged.
+
+ModelCleaner.tsx owns an isolated Three.js preview and disposes its export copy on
+close. model-cleaner.ts generates per-triangle dominant-axis UV projection in local
+metres and computes diagnostics. UV generation preserves positions but expands
+indexed meshes to support projection seams. Checkers are preview-only; GLB retains
+the original material placeholders. No source model mutation is performed.
+
+Saved UV recipes are applied to independent export copies by `applyPreparedUVs`.
+`preparationStatus` checks requested part IDs against a scene-wide geometry signature.
+ModelCleaner receives a save callback; main.tsx persists the recipe in the scene and
+applies it in both standalone-model and complete-package exports.

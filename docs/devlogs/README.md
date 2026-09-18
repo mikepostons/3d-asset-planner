@@ -20,3 +20,22 @@ Use `YYYY-MM-DD-short-description.md`. Log meaningful delivered changes and actu
 - [2026-09-17 — Architectural details](2026-09-17-architectural-details.md)
 - [2026-09-18 — Arches and keystones](2026-09-18-arches.md)
 - [2026-09-18 — Continuous corner quoins](2026-09-18-quoins.md)
+- [2026-09-18 — Stone clusters and end bands](2026-09-18-stone-dressing.md)
+
+- [Roof construction and trim](2026-09-18-roof-details.md) — thickness, overhangs, fascia and ridge caps.
+
+- [Compact floor guide labels](2026-09-18-floor-labels.md) — smaller, content-sized floor badges.
+
+- [Material editing performance](2026-09-18-material-editing-performance.md) — skip geometry work for descriptive edits; cache cluster placement; debounce recovery.
+
+- [Structural GLB export](2026-09-18-glb-export.md) — scope, terrain, origin and diagnostic export package.
+
+- [Model Cleaner and hierarchy](2026-09-18-model-cleaner.md) — grouped exports, initial projection UVs and checker preview.
+
+- [Export hub and header cleanup](2026-09-18-export-hub.md) — combined export choices, save status and icons.
+
+- [New scene confirmation](2026-09-18-new-scene-confirmation.md)
+
+- [Below-ground foundations](2026-09-18-foundations.md)
+
+- [Scene settings tabs](2026-09-18-scene-settings-tabs.md)

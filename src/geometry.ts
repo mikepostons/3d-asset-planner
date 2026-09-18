@@ -1,3 +1,4 @@
+import { detailedRoof } from "./roof-details";
 import { openingBodyGeometry } from "./openings";
 import { ConvexGeometry } from "three/addons/geometries/ConvexGeometry.js";
 import * as T from "three";
@@ -18,6 +19,10 @@ function clip(points: Point[], axis: number, positive: boolean): Point[] {
   return out;
 }
 export function partGeometry(p: Part, roof: boolean): T.BufferGeometry {
+  if (roof && p.roofEnabled !== false && p.roofDetails && p.shape !== "circle") return detailedRoof(p, basePartGeometry);
+  return basePartGeometry(p, roof);
+}
+function basePartGeometry(p: Part, roof: boolean): T.BufferGeometry {
   if (!roof && (p.hollowWalls || p.openings?.length))
     return openingBodyGeometry(p);
   if (roof && p.roofEnabled === false) return new T.BufferGeometry();

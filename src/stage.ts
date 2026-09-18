@@ -1,3 +1,8 @@
+import {foundationFor,foundationGeometry,foundationDefaults} from "./foundations";
+import { prepareModelExport } from "./model-export";
+import { geometryKey } from "./geometry-key";
+import { gableInfill } from "./roof-details";
+import { dressingGeometry } from "./stone-dressing";
 import { architecturalGeometry } from "./architectural-details";
 import { infillGeometry } from "./infills";
 import {
@@ -63,6 +68,7 @@ export class Stage {
   selected: string | null = null;
   tool: Tool = "select";
   activeFace: { partId: string; index: number } | null = null;
+  selectedCluster: string | null = null;
   selectedOpening: string | null = null;
   selectedOpenings: string[] = [];
   openingKind: OpeningKind = "door";
@@ -167,7 +173,15 @@ export class Stage {
     });
     g.clear();
   }
+  private lastUpdateKey = "";
   update(d: Plan, selected: string | null, tool: Tool) {
+    const key = geometryKey({d, selected, tool, selectionMode:this.selectionMode,
+      drawShape:this.drawShape,addShape:this.addShape,showFloors:this.showFloors,
+      showTerrain:this.showTerrain,xray:this.xray,activeFace:this.activeFace,
+      selectedCluster:this.selectedCluster,selectedOpening:this.selectedOpening,
+      selectedOpenings:this.selectedOpenings,openingKind:this.openingKind,view:this.view});
+    if (key === this.lastUpdateKey) { this.plan = d; return; }
+    this.lastUpdateKey = key;
     if (
       (this.drag || this.openingDrag) &&
       (tool !== this.tool || selected !== this.selected)
@@ -282,6 +296,8 @@ export class Stage {
     const collection = members.length > 0 && this.selected !== members[0].id;
     for (const p of this.plan.parts) {
       const group = new T.Group();
+      group.name = p.name;
+      group.userData = {partId:p.id, groupId:p.groupId ?? null};
       group.position.set(p.x, baseY(p), p.z);
       group.rotation.y = (p.rotation * Math.PI) / 180;
       const wall = new T.Mesh(
@@ -292,9 +308,40 @@ export class Stage {
           roughness: 1,
         }),
       );
+      wall.name = "Walls";
       wall.userData.wall = true;
       wall.userData.part = p.id;
       group.add(wall);
+      if(p.roofDetails && p.roofEnabled!==false && p.roof==="gable") {
+        const skin=partGeometry({...p,roofDetails:{...p.roofDetails,fascia:false,ridgeCap:false}},true);
+        for(const item of gableInfill(p,skin)) {
+          const infill=new T.Mesh(item.geometry,new T.MeshStandardMaterial({color:item.mode==="wall"?(p.role==="main"?0x9caeaf:0x6d9993):0x958773,side:T.DoubleSide,roughness:1,transparent:this.xray,opacity:this.xray?.22:1}));
+          infill.userData={part:p.id,gableEnd:item.end,materialDescription:item.mode==="wall"?p.materials:item.material};group.add(infill);
+        }
+        skin.dispose();
+      }
+
+      for (const item of dressingGeometry(p, this.plan.parts)) {
+        const mesh = new T.Mesh(
+          item.geometry,
+          new T.MeshStandardMaterial({
+            color: !this.exporting && p.id === this.selected && item.clusterId === this.selectedCluster ? 0x4cdec5 : 0xa6a396,
+            roughness: 1,
+            side: T.DoubleSide,
+            transparent: this.xray,
+            opacity: this.xray ? 0.22 : 1,
+            depthWrite: !this.xray,
+          }),
+        );
+        mesh.name = item.name;
+        mesh.userData = {
+          part: p.id,
+          stoneDressing: true,
+          clusterId: item.clusterId,
+          materialDescription: item.material,
+        };
+        group.add(mesh);
+      }
       for (const item of architecturalGeometry(p)) {
         const mesh = new T.Mesh(
           item.geometry,
@@ -311,6 +358,7 @@ export class Stage {
         mesh.userData = {
           part: p.id,
           architecturalDetail: true,
+          openingId: item.openingId,
           materialDescription: item.material,
         };
         group.add(mesh);
@@ -331,8 +379,15 @@ export class Stage {
         }
       const roof = p.roofEnabled === false ? null : this.roof(p);
       if (roof) {
+        roof.name = "Roof";
         roof.userData.part = p.id;
         group.add(roof);
+      }
+      const foundation=foundationFor(this.plan,p);
+      if(foundation){
+        const mesh=new T.Mesh(foundationGeometry(p,foundation),new T.MeshStandardMaterial({color:0x829393,roughness:1}));
+        mesh.name="Foundation";mesh.userData={part:p.id,materialDescription:foundation.material??p.bodyMaterial};
+        group.add(mesh);
       }
       this.solids.add(group);
       if (this.activeFace?.partId === p.id && p.shape !== "circle") {
@@ -654,7 +709,7 @@ export class Stage {
           this.aids.add(line);
           if (p.id === this.selected)
             this.label(
-              `~${Math.round((y - baseY(p)) / p.floorHeight)} floor(s) · ${y.toFixed(2)} m`,
+              `F${Math.round((y - baseY(p)) / p.floorHeight)} · ${Number(y.toFixed(2))} m`,
               pts
                 .slice(0, -1)
                 .sort(
@@ -664,6 +719,7 @@ export class Stage {
                 )[0]
                 .clone(),
               this.aids,
+              true,
             );
         }
     }
@@ -1873,15 +1929,17 @@ export class Stage {
       this.axes(choice.pos, choice.kind, p, choice.level);
     }
   }
-  label(text: string, pos: T.Vector3, group: T.Group) {
+  label(text: string, pos: T.Vector3, group: T.Group, compact = false) {
     const canvas = document.createElement("canvas");
-    canvas.width = text.length === 1 ? 80 : 512;
+    const measure = canvas.getContext("2d")!;
+    measure.font = "28px sans-serif";
+    canvas.width = compact ? Math.ceil(measure.measureText(text).width) + 24 : text.length === 1 ? 80 : 512;
     canvas.height = 80;
     const ctx = canvas.getContext("2d")!;
-    ctx.fillStyle = "rgba(15,25,31,.85)";
+    ctx.fillStyle = compact ? "rgba(15,25,31,.6)" : "rgba(15,25,31,.85)";
     ctx.fillRect(0, 0, canvas.width, 80);
     ctx.fillStyle = "#d9efee";
-    ctx.font = text.length === 1 ? "52px sans-serif" : "32px sans-serif";
+    ctx.font = compact ? "28px sans-serif" : text.length === 1 ? "52px sans-serif" : "32px sans-serif";
     ctx.textAlign = "center";
     ctx.fillText(text, canvas.width / 2, 52);
     const sprite = new T.Sprite(
@@ -1891,7 +1949,8 @@ export class Stage {
       }),
     );
     sprite.position.copy(pos);
-    sprite.scale.set(3.6, 0.56, 1);
+    sprite.scale.set(compact ? canvas.width / 80 * .3 : 3.6, compact ? .3 : .56, 1);
+    if (compact) sprite.center.set(-.08, .5);
     sprite.renderOrder = 30;
     group.add(sprite);
   }
@@ -2057,6 +2116,15 @@ export class Stage {
     this.camera.lookAt(centre);
     this.controls.enableRotate = !flatView(view) && this.tool === "select";
     this.controls.update();
+  }
+  modelExport(parts: Part[], includeTerrain: boolean, centre: boolean) {
+    if(this.drag || this.openingDrag) throw Error("Finish the current edit before exporting.");
+    const original=this.plan, xray=this.xray, selected=this.selected, exporting=this.exporting;
+    try {
+      this.plan={...original,parts,structureFoundations:Object.fromEntries(parts.map(p=>[p.id,foundationFor(original,p)??foundationDefaults]))};this.xray=false;this.selected=null;this.exporting=true;
+      this.rebuild();
+      return prepareModelExport(this.solids,includeTerrain?this.terrain:undefined,this.plan,centre);
+    } finally {this.plan=original;this.xray=xray;this.selected=selected;this.exporting=exporting;this.rebuild();}
   }
   async captures(includeTerrain = true) {
     this.disposeGroup(this.preview);

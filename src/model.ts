@@ -1,3 +1,11 @@
+import {type FoundationSettings, validateFoundation} from "./foundations";
+import { type RoofDetails, validateRoofDetails, scaleRoofDetails } from "./roof-details";
+import {
+  validateDressing,
+  scaleDressing,
+  type StoneClusters,
+  type StoneBands,
+} from "./stone-dressing";
 import {
   validateDetails,
   scaleDetails,
@@ -8,6 +16,8 @@ import { bodyMaterial, materialText } from "./materials";
 export type MaterialDescription = { name: string; description: string };
 export type Roof = "gable" | "lean-to" | "flat";
 export type Part = {
+  stoneClusters?: StoneClusters;
+  stoneBands?: StoneBands;
   architecturalDetails?: ArchitecturalDetails;
   id: string;
   name: string;
@@ -22,6 +32,7 @@ export type Part = {
   floorHeight: number;
   roof: Roof;
   roofEnabled?: boolean;
+  roofDetails?: RoofDetails;
   openings?: Opening[];
   hollowWalls?: boolean;
   wallThickness?: number;
@@ -53,6 +64,7 @@ export type Plan = {
   front: number;
   terrain: "full" | "minimal" | "none";
   notes: string;
+  preparedUVs?: Record<string,{sourceKey:string;metresPerTile:number}>;
   terrainMaterial?: MaterialDescription;
   parts: Part[];
   groups?: { id: string; name: string; mainAspect?: number }[];
@@ -60,6 +72,8 @@ export type Plan = {
   structureAspects?: Record<string, number>;
   terrainLayout?: "none" | "scene" | "collections";
   terrainMargin?: number;
+  foundation?: FoundationSettings;
+  structureFoundations?: Record<string,FoundationSettings>;
 };
 export const uid = () => globalThis.crypto.randomUUID();
 export const clone = <T>(x: T): T => structuredClone(x);
@@ -130,6 +144,8 @@ export function resizeModule(d: Plan, size: number, rescale: boolean): Plan {
   if (rescale) {
     const r = size / n.moduleSize;
     for (const p of n.parts) {
+      scaleDressing(p, r);
+      scaleRoofDetails(p, r);
       scaleDetails(p.architecturalDetails, r);
       scaleOpenings(p, r);
       if (p.wallHeight !== undefined) p.wallHeight *= r;
@@ -241,8 +257,11 @@ export function validate(raw: unknown): Plan {
     !["none", "scene", "collections"].includes(d.terrainLayout)
   )
     throw Error("Invalid terrain layout.");
+  if(d.foundation) validateFoundation(d.foundation);
+  if(d.structureFoundations) Object.values(d.structureFoundations).forEach(validateFoundation);
   if (d.terrainMargin !== undefined && !num(d.terrainMargin, 0.25, 30))
     throw Error("Invalid terrain margin.");
+  if(d.preparedUVs && (typeof d.preparedUVs!=="object" || Object.values(d.preparedUVs).some(v=>!v || typeof v.sourceKey!=="string" || !Number.isFinite(v.metresPerTile) || v.metresPerTile<=0))) throw Error("Invalid saved UV preparation.");
   let ids = new Set();
   for (const p of d.parts) {
     if (
@@ -313,6 +332,8 @@ export function validate(raw: unknown): Plan {
       !["front", "back", "left", "right"].includes(p.highEdge)
     )
       throw Error("A building part has invalid dimensions or settings.");
+    validateDressing(p);
+    validateRoofDetails(p);
     validateDetails(p.architecturalDetails);
     validateOpenings(p);
     ids.add(p.id);
@@ -331,7 +352,7 @@ export const slug = (name: string) =>
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "") || "building";
 export function brief(d: Plan): string {
-  return `# ${d.name} — structural reference\n\nUse the mining-game-building-art skill. The attached plan and blockout renders are STRUCTURAL authority. Approved artwork references define style only. Preserve footprint, heights, roof directions and part placement. Do not interpret plain blockout colours as final materials.\n\nUnits: metres. Major cube: ${d.moduleSize} m. Front: ${d.front}° from world +Z toward +X. X/Z are ground; Y is up. Each part has its own base elevation; preserve roof-mounted parts. Terrain intent: ${d.terrain}. Terrain material: ${d.terrain === "none" ? "not included" : materialText(d.terrainMaterial)}. Terrain layout: ${d.terrainLayout ?? "none"}; footprint margin: ${d.terrainMargin ?? 1.5} m. Touching terrain patches are joined, never layered.\n\n## Scene organisation\n\n${sceneStructures(
+  return `# ${d.name} — structural reference\n\nUse the mining-game-building-art skill. The attached plan and blockout renders are STRUCTURAL authority. Approved artwork references define style only. Preserve footprint, heights, roof directions and part placement. Do not interpret plain blockout colours as final materials.\n\nUnits: metres. Major cube: ${d.moduleSize} m. Front: ${d.front}° from world +Z toward +X. X/Z are ground; Y is up. Each part has its own base elevation; preserve roof-mounted parts. Foundations: ${JSON.stringify(d.foundation ?? {enabled:false})}. Structure foundation overrides: ${JSON.stringify(d.structureFoundations ?? {})}. Terrain intent: ${d.terrain}. Terrain material: ${d.terrain === "none" ? "not included" : materialText(d.terrainMaterial)}. Terrain layout: ${d.terrainLayout ?? "none"}; footprint margin: ${d.terrainMargin ?? 1.5} m. Touching terrain patches are joined, never layered.\n\n## Scene organisation\n\n${sceneStructures(
     d,
   )
     .map(
@@ -340,7 +361,7 @@ export function brief(d: Plan): string {
     )
     .join(
       "\n",
-    )}\nGroups: ${JSON.stringify(d.groups ?? [])}. Part memberships: ${JSON.stringify(d.parts.map((p) => ({ part: p.id, group: p.groupId ?? null })))}\n\n## Locked parts\n\n${d.parts.map((p) => `- ${p.name} (${p.role}, ID ${p.id}): shape ${p.shape ?? "rectangle"}; base elevation ${p.baseY ?? 0} m; centre X ${p.x}, Z ${p.z}; width ${p.width} × depth ${p.depth} m; ${p.shape === "circle" ? `cylinder ${p.innerDiameter !== undefined ? `with open bore bottom diameter ${p.innerDiameter} m, top diameter ${p.topInnerDiameter ?? p.innerDiameter} m; ` : ""}bottom diameter ${p.width} m, top diameter ${p.topDiameter ?? p.width} m;` : ""} local rotation ${p.rotation}°; ${Number(estimatedFloors(p).toFixed(2))} estimated floors (floor height ${p.floorHeight} m); explicit eaves height ${height(p)} m; roof ${p.roofEnabled === false ? "disabled (plain capped volume)" : p.roof}, rise ${p.roofEnabled === false || p.roof === "flat" ? 0 : p.rise} m, ridge along local ${p.ridge}, lean-to high edge ${p.highEdge}. Ridge endpoints (normalised local X, metres above eaves, normalised local Z): ${JSON.stringify(ridgeEnds(p))}. Corner wall heights: ${JSON.stringify(p.cornerHeights ?? [])}; corner base heights: ${JSON.stringify(p.cornerBases ?? [])}. Footprint normalised local X/Z corners: ${JSON.stringify(footprint(p))}. Wall construction: ${p.hollowWalls ? `hollow, thickness ${p.wallThickness ?? 0.4} m` : "solid, openings are recesses"}. Openings (wall index, metre offsets and sizes): ${JSON.stringify(p.openings ?? [])}. Architectural details: ${JSON.stringify(p.architecturalDetails ?? null)}. Body material: ${materialText(bodyMaterial(p))}. Roof material: ${p.roofEnabled === false ? "not included (roof disabled)" : materialText(p.roofMaterial)}.`).join("\n")}\n\n## Artistic guidance\n\n${d.notes || "Follow the approved project art direction."}\n\n## Unspecified details\n\nDoors, windows, surface wear and dressing may be unspecified. Circular parts can represent chimneys; preserve every modelled part. Infer them conservatively without changing the locked structural volumes. No new extensions. Roof intersections are unmerged blockout geometry, not construction drawings.\n\n## Review warnings\n\n${
+    )}\nGroups: ${JSON.stringify(d.groups ?? [])}. Part memberships: ${JSON.stringify(d.parts.map((p) => ({ part: p.id, group: p.groupId ?? null })))}\n\n## Locked parts\n\n${d.parts.map((p) => `- ${p.name} (${p.role}, ID ${p.id}): shape ${p.shape ?? "rectangle"}; base elevation ${p.baseY ?? 0} m; centre X ${p.x}, Z ${p.z}; width ${p.width} × depth ${p.depth} m; ${p.shape === "circle" ? `cylinder ${p.innerDiameter !== undefined ? `with open bore bottom diameter ${p.innerDiameter} m, top diameter ${p.topInnerDiameter ?? p.innerDiameter} m; ` : ""}bottom diameter ${p.width} m, top diameter ${p.topDiameter ?? p.width} m;` : ""} local rotation ${p.rotation}°; ${Number(estimatedFloors(p).toFixed(2))} estimated floors (floor height ${p.floorHeight} m); explicit eaves height ${height(p)} m; roof ${p.roofEnabled === false ? "disabled (plain capped volume)" : p.roof}, rise ${p.roofEnabled === false || p.roof === "flat" ? 0 : p.rise} m, ridge along local ${p.ridge}, lean-to high edge ${p.highEdge}. Ridge endpoints (normalised local X, metres above eaves, normalised local Z): ${JSON.stringify(ridgeEnds(p))}. Corner wall heights: ${JSON.stringify(p.cornerHeights ?? [])}; corner base heights: ${JSON.stringify(p.cornerBases ?? [])}. Footprint normalised local X/Z corners: ${JSON.stringify(footprint(p))}. Wall construction: ${p.hollowWalls ? `hollow, thickness ${p.wallThickness ?? 0.4} m` : "solid, openings are recesses"}. Openings (wall index, metre offsets and sizes): ${JSON.stringify(p.openings ?? [])}. Architectural details: ${JSON.stringify(p.architecturalDetails ?? null)}. Stone clusters: ${JSON.stringify(p.stoneClusters ?? null)}. Stone bands: ${JSON.stringify(p.stoneBands ?? null)}. Body material: ${materialText(bodyMaterial(p))}. Roof details: ${JSON.stringify(p.roofDetails ?? null)}. Roof material: ${p.roofEnabled === false ? "not included (roof disabled)" : materialText(p.roofMaterial)}.`).join("\n")}\n\n## Artistic guidance\n\n${d.notes || "Follow the approved project art direction."}\n\n## Unspecified details\n\nDoors, windows, surface wear and dressing may be unspecified. Circular parts can represent chimneys; preserve every modelled part. Infer them conservatively without changing the locked structural volumes. No new extensions. Roof intersections are unmerged blockout geometry, not construction drawings.\n\n## Review warnings\n\n${
     warnings(d)
       .map((x) => "- " + x)
       .join("\n") || "No structural warnings."
@@ -508,6 +529,8 @@ export function scalePart(source: Part, factor: number): Part {
   if (!Number.isFinite(factor) || factor <= 0)
     throw new Error("Scale must be greater than zero.");
   const p = clone(source);
+  scaleDressing(p, factor);
+  scaleRoofDetails(p, factor);
   scaleDetails(p.architecturalDetails, factor);
   scaleOpenings(p, factor);
   for (const key of ["width", "depth", "floorHeight", "rise"] as const)

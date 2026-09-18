@@ -130,3 +130,92 @@ chamfer and surround materials are used. A keystone replaces the two crown secto
 Quoins now form one continuous corner block per course, with long/short dimensions
 swapped on successive courses. This replaces separate wall strips and fills the
 previous indentation at the projecting outside corner.
+
+### Stone clusters and end bands
+Component Settings has Stone clusters for all part shapes, plus Stone end bands
+for cylinders/donuts. Clusters expose component seed, stone size/variation, edge
+and opening clearance, projection, gap, chamfer/material; each cluster has its own
+seed, count, spread, optional size override, regenerate/remove actions.
+Placement excludes openings and conservative surround bounds, wall edges,
+quoins and cylinder end margins. Curved stones map onto tapered outer walls;
+donut interiors are excluded. Fit shortfalls are reported.
+
+Top/bottom bands have independent toggles and shared height, overhang, count, gap,
+variation, seed/material. Donut bores stay open; cylinders optionally fill the band
+centre. Settings and meshes are included in reference exports.
+
+New clusters target the active wall in Select → Faces; the Add button names the
+face. Each cluster has a Placement face selector for correcting existing clusters.
+Largest-exposed-space and connected-patch placement remain proposed work.
+
+Cluster placement now excludes stone samples inside other scene components'
+body or roof volumes, including touching extensions. Counts update automatically
+when parts move; this does not yet rank the largest exposed wall patches.
+
+Clusters now use whole staggered row patterns: 1–2, 2–3, 2–3–2 or 3–2–3.
+Space between clusters is independent of stone mortar gaps. Whole-patch candidate
+placement favours roomier positions and rejects any patch conflicting with edges,
+surrounds, another cluster or covered surfaces. Individual stones no longer scatter.
+
+Mixed cluster sizes are the default, weighted toward small 1–2 patches. The
+Mix all cluster sizes button changes existing patterns to mixed; per-cluster fixed
+patterns remain available. Regenerating seeds also regenerates mixed patterns.
+
+Cylinder/donut patches wrap around the outer wall with locally sized stones on
+tapers and seam-aware spacing. Add outer-wall cluster is available in Stone clusters.
+
+Clusters can be selected/highlighted from their settings and repositioned with
+horizontal/height fields (angle/height for circular parts). Each has Delete cluster;
+Delete all clusters clears the current component. Both support scene undo.
+
+### Roof construction and trim
+Opt-in Roof construction & trim adds vertical thickness, shared side overhang and
+independent end overhangs for pitched, lean-to and flat roofs. Fascia boards and
+gable ridge strips have dimension controls. Trim shares the roof material.
+Circular components retain their existing end-band controls.
+
+Roof ridge caps now fold flush along both slopes. Fascia inset is configurable.
+Gable ends support shared or independent hidden/wall-extension/separate-material
+settings, defaulting to wall infill. Infill meshes remain separate from the base wall.
+
+Side/end fascia groups independently control height, thickness, inset and drop;
+boards start below the roof skin. Optional ridge beams support independent end
+extensions and width/height/drop controls on gable roofs.
+
+Side fascia boards have a signed length offset per end for extending or shortening
+them independently of roof overhang and end-board settings.
+
+Floor guide labels use compact F1 · 3 m text, content-sized backgrounds and smaller
+badges offset from the selected component's corner.
+
+### Structural 3D export
+Export 3D model downloads a GLB ZIP with source plan and geometry report. Supports
+scene or selected component/structure/group, optional configured terrain and centred
+base origin. Named parts and placeholder material slots are retained. Editor aids
+are excluded. UVs, textures, cleanup, collision and LOD generation remain pending;
+this supersedes earlier statements that structural mesh export is only planned.
+
+### Initial Model Cleaner
+Model Cleaner opens an independent copy of the selection (or scene), reports mesh,
+triangle, UV and degenerate-face counts, generates tiling projection UVs and previews
+a checkerboard. A two-column modal puts controls on the left and the viewer on the
+right. Save preparation persists UV settings with the scene; model and complete
+exports apply them automatically. Missing or outdated preparation produces a warning.
+Packed unwrap, curved mapping, merging and baking remain pending.
+Export parent folders now organise openings/surrounds, quoins, clusters, bands and
+roof assembly under named components and scene groups.
+
+Unified Export dialog offers reference, model and complete scene packages. Complete
+includes structural GLB plus references and current saved UV preparation.
+Header save colour indicates dirty/saved state; Help is in the canvas footer.
+
+New uses a circled-plus icon and always confirms before closing the current scene,
+with cancel, continue without saving, and save-and-continue actions.
+
+### Foundations
+Scene defaults and connected-structure overrides control below-ground depth, outward
+margin and material metadata. Included independently of terrain in renders and model
+exports. Ground-level footprint sections remain separate; Boolean union is pending.
+
+Scene Settings uses General, Terrain, Foundations and Export tabs, with a scrolling
+content area and always-visible Save/Cancel footer.
