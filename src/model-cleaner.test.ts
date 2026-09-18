@@ -31,3 +31,33 @@ test('saved preparation survives scene serialization and expires after geometry 
  p.materials='Changed description';assert.equal(preparationStatus(prepared,[p.id]),true);
  p.width+=1;assert.equal(preparationStatus(prepared,[p.id]),false);assert.equal(applyPreparedUVs(root,prepared),0);disposeExport(root);
 });
+
+test('cylinder unwrap uses circumference, height and a local seam',()=>{
+ const root=new T.Group(),mesh=new T.Mesh(new T.CylinderGeometry(2,2,4,64),new T.MeshStandardMaterial());mesh.userData.uvSurface='cylinder';root.add(mesh);generateUVs(root,1);
+ const p=mesh.geometry.getAttribute('position'),uv=mesh.geometry.getAttribute('uv');let maxWidth=0;
+ for(let i=0;i<p.count;i+=3){if(Math.abs(p.getY(i)-p.getY(i+1))<1e-6&&Math.abs(p.getY(i)-p.getY(i+2))<1e-6)continue;
+ const us=[0,1,2].map(j=>uv.getX(i+j));maxWidth=Math.max(maxWidth,Math.max(...us)-Math.min(...us));
+ const ys=[0,1,2].map(j=>uv.getY(i+j));assert.ok(Math.abs(Math.max(...ys)-Math.min(...ys)-4)<1e-5);
+ }assert.ok(maxWidth<.21);assert.ok(maxWidth>.19);disposeExport(root);
+});
+test('tapered development preserves wall slant height',()=>{
+ const root=new T.Group(),mesh=new T.Mesh(new T.CylinderGeometry(1,2,4,64,1,true),new T.MeshStandardMaterial());mesh.userData.uvSurface='cylinder';root.add(mesh);generateUVs(root);
+ const p=mesh.geometry.getAttribute('position'),uv=mesh.geometry.getAttribute('uv');let checked=0;
+ for(let i=0;i<p.count;i+=3)for(let a=0;a<3;a++)for(let b=a+1;b<3;b++){
+ const aa=i+a,bb=i+b;if(Math.abs(p.getY(aa)-p.getY(bb))<1)continue;
+ const thetaA=Math.atan2(p.getZ(aa),p.getX(aa)),thetaB=Math.atan2(p.getZ(bb),p.getX(bb));if(Math.abs(thetaA-thetaB)>1e-5)continue;
+ assert.ok(Math.abs(Math.hypot(uv.getX(aa)-uv.getX(bb),uv.getY(aa)-uv.getY(bb))-Math.sqrt(17))<1e-4);checked++;
+ }assert.ok(checked>0);disposeExport(root);
+});
+test('sloping planar mapping preserves edge lengths',()=>{
+ const g=new T.BufferGeometry();g.setAttribute('position',new T.Float32BufferAttribute([0,0,0,3,0,0,0,4,3],3));const root=new T.Group(),mesh=new T.Mesh(g,new T.MeshStandardMaterial());root.add(mesh);generateUVs(root);const uv=mesh.geometry.getAttribute('uv');assert.ok(Math.abs(Math.hypot(uv.getX(2)-uv.getX(0),uv.getY(2)-uv.getY(0))-5)<1e-5);disposeExport(root);
+});
+test('hollow cylinder inner wall uses its own circumference and caps stay planar',async()=>{
+ const {foundationGeometry}=await import('./foundations');const root=new T.Group();
+ const mesh=new T.Mesh(foundationGeometry({...part(),shape:'circle',width:4,innerDiameter:2},{enabled:true,depth:2,margin:0}),new T.MeshStandardMaterial());mesh.userData.uvSurface='cylinder';root.add(mesh);generateUVs(root);
+ const p=mesh.geometry.getAttribute('position'),uv=mesh.geometry.getAttribute('uv');let inner=0,caps=0;
+ for(let i=0;i<p.count;i+=3){const vs=[0,1,2].map(j=>new T.Vector3().fromBufferAttribute(p,i+j));
+ if(vs.every(v=>Math.abs(v.y-vs[0].y)<1e-5)){for(let j=1;j<3;j++)assert.ok(Math.abs(vs[j].distanceTo(vs[0])-Math.hypot(uv.getX(i+j)-uv.getX(i),uv.getY(i+j)-uv.getY(i)))<1e-5);caps++;}
+ else if(vs.every(v=>Math.abs(Math.hypot(v.x,v.z)-1)<1e-5)){const us=[0,1,2].map(j=>uv.getX(i+j));assert.ok(Math.max(...us)-Math.min(...us)<.14);inner++;}
+ }assert.ok(inner>0&&caps>0);disposeExport(root);
+});

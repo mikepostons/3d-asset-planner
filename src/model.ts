@@ -64,7 +64,7 @@ export type Plan = {
   front: number;
   terrain: "full" | "minimal" | "none";
   notes: string;
-  preparedUVs?: Record<string,{sourceKey:string;metresPerTile:number}>;
+  preparedUVs?: Record<string,{sourceKey:string;metresPerTile:number;repair?:boolean}>;
   terrainMaterial?: MaterialDescription;
   parts: Part[];
   groups?: { id: string; name: string; mainAspect?: number }[];
@@ -261,7 +261,7 @@ export function validate(raw: unknown): Plan {
   if(d.structureFoundations) Object.values(d.structureFoundations).forEach(validateFoundation);
   if (d.terrainMargin !== undefined && !num(d.terrainMargin, 0.25, 30))
     throw Error("Invalid terrain margin.");
-  if(d.preparedUVs && (typeof d.preparedUVs!=="object" || Object.values(d.preparedUVs).some(v=>!v || typeof v.sourceKey!=="string" || !Number.isFinite(v.metresPerTile) || v.metresPerTile<=0))) throw Error("Invalid saved UV preparation.");
+  if(d.preparedUVs && (typeof d.preparedUVs!=="object" || Object.values(d.preparedUVs).some(v=>!v || (v.repair!==undefined && typeof v.repair!=="boolean") || typeof v.sourceKey!=="string" || !Number.isFinite(v.metresPerTile) || v.metresPerTile<=0))) throw Error("Invalid saved UV preparation.");
   let ids = new Set();
   for (const p of d.parts) {
     if (

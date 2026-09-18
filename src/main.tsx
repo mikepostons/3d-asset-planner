@@ -421,7 +421,7 @@ function App() {
       if(!parts.length)throw Error("Select a component, structure or group first.");
       result=stage.current!.modelExport(parts,modelTerrain,modelCentre);
       applyPreparedUVs(result.root,d);
-      result.report.missingUVs=cleanerDiagnostics(result.root).missingUVs;
+      {const stats=cleanerDiagnostics(result.root);result.report.missingUVs=stats.missingUVs;result.report.triangles=stats.triangles;result.report.degenerateTriangles=stats.degenerate;if(!stats.degenerate)result.report.warnings=result.report.warnings.filter(w=>!w.includes("degenerate triangles"));}
       result.report.warnings=result.report.warnings.filter(w=>!w.includes("no UV mapping"));
       if(result.report.missingUVs)result.report.warnings.push(`${result.report.missingUVs} meshes lack UVs.`);
       const glb=await encodeGLB(result.root);
@@ -780,7 +780,7 @@ function App() {
       if(completeExport){
         const model=stage.current.modelExport(d.parts,includeTerrain,true);
         applyPreparedUVs(model.root,d);
-        model.report.missingUVs=cleanerDiagnostics(model.root).missingUVs;
+        {const stats=cleanerDiagnostics(model.root);model.report.missingUVs=stats.missingUVs;model.report.triangles=stats.triangles;model.report.degenerateTriangles=stats.degenerate;if(!stats.degenerate)model.report.warnings=model.report.warnings.filter(w=>!w.includes("degenerate triangles"));}
         model.report.warnings=model.report.warnings.filter(w=>!w.includes("no UV mapping"));
         if(model.report.missingUVs)model.report.warnings.push(`${model.report.missingUVs} meshes lack UVs.`);
         try {zip.file(`${prefix}.glb`,await encodeGLB(model.root));zip.file("geometry-report.json",JSON.stringify(model.report,null,2));}
@@ -2739,7 +2739,7 @@ function App() {
           </button>
         </div>
       )}
-      {cleanerRoot && <ModelCleaner root={cleanerRoot} prepared={preparationStatus(d,(selectedParts(d,selected).length?selectedParts(d,selected):d.parts).map(p=>p.id)) && new Set((selectedParts(d,selected).length?selectedParts(d,selected):d.parts).map(p=>d.preparedUVs?.[p.id]?.metresPerTile)).size===1} initialScale={d.preparedUVs?.[(selectedParts(d,selected)[0]??d.parts[0])?.id]?.metresPerTile??1} onSave={async scale=>{const parts=selectedParts(d,selected);const next=clone(live.current);next.preparedUVs={...next.preparedUVs};for(const p of parts.length?parts:d.parts)next.preparedUVs[p.id]={sourceKey:preparationKey(next),metresPerTile:scale};commit(next);return await persist(next.name,undefined,next);}} onClose={()=>setCleanerRoot(null)}/>}
+      {cleanerRoot && <ModelCleaner root={cleanerRoot} prepared={preparationStatus(d,(selectedParts(d,selected).length?selectedParts(d,selected):d.parts).map(p=>p.id)) && new Set((selectedParts(d,selected).length?selectedParts(d,selected):d.parts).map(p=>d.preparedUVs?.[p.id]?.metresPerTile)).size===1} initialScale={d.preparedUVs?.[(selectedParts(d,selected)[0]??d.parts[0])?.id]?.metresPerTile??1} onSave={async (scale,repair)=>{const parts=selectedParts(d,selected);const next=clone(live.current);next.preparedUVs={...next.preparedUVs};for(const p of parts.length?parts:d.parts)next.preparedUVs[p.id]={sourceKey:preparationKey(next),metresPerTile:scale,repair:repair||next.preparedUVs[p.id]?.repair};commit(next);return await persist(next.name,undefined,next);}} onClose={()=>setCleanerRoot(null)}/>}
       {exportHub && <div className="modal-backdrop"><section className="modal export-hub" role="dialog" aria-modal="true" aria-label="Export"><h2><ToolIcon name="export" /> Export</h2><p>References come directly from your scene. Model exports automatically use saved, up-to-date Cleaner UVs.</p>{!preparationStatus(d,d.parts.map(p=>p.id)) && <p className="export-warning" role="status">Some components have not been prepared in Cleaner, or their geometry has changed. You can export now, but those components will use their original UVs.</p>}<div className="export-grid">
         <button onClick={()=>{setCompleteExport(false);setExportHub(false);setExportDialog(true);}}><ToolIcon name="package" /><strong>Export Reference Package</strong><span>Nine views, source plan, brief and manifest.</span></button>
         <button onClick={()=>{setExportHub(false);setModelDialog(true);}}><ToolIcon name="export" /><strong>Export Model</strong><span>Structural GLB with scope, terrain and origin options.</span></button>

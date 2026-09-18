@@ -151,3 +151,6 @@ The recipe regenerates UV buffers deterministically; no preview checker is persi
 Optional `foundation` and `structureFoundations` store enabled/depth/margin/material
 settings. Overrides use the existing connected structure IDs. Defaults are disabled;
 changes in connectivity can change the structure ID, as with existing aspect overrides.
+
+Prepared UV records may include `repair: true`. This runs conservative mesh repair
+before UV generation and attribute-aware welding afterward on the export copy.

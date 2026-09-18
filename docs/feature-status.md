@@ -219,3 +219,12 @@ exports. Ground-level footprint sections remain separate; Boolean union is pendi
 
 Scene Settings uses General, Terrain, Foundations and Export tabs, with a scrolling
 content area and always-visible Save/Cancel footer.
+
+Cleaner now supports cylindrical and conical surface mapping, independent inner-wall
+profiles, planar caps and slope-correct roof mapping. Checker density/wireframe aid
+inspection. This supersedes the earlier curved-mapping limitation; packed UVs and
+seamless tiling across cone seams remain outside this stage.
+
+Cleaner offers independent wireframe, problem-edge highlights, conservative per-mesh
+repair, before/after counts and reset. Saved repairs reapply during model exports.
+Boolean merging, subdivision application and face-orientation correction remain pending.

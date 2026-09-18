@@ -310,6 +310,7 @@ export class Stage {
       );
       wall.name = "Walls";
       wall.userData.wall = true;
+      if(p.shape === "circle") wall.userData.uvSurface="cylinder";
       wall.userData.part = p.id;
       group.add(wall);
       if(p.roofDetails && p.roofEnabled!==false && p.roof==="gable") {
@@ -381,12 +382,13 @@ export class Stage {
       if (roof) {
         roof.name = "Roof";
         roof.userData.part = p.id;
+        if(p.shape === "circle") roof.userData.uvSurface="cylinder";
         group.add(roof);
       }
       const foundation=foundationFor(this.plan,p);
       if(foundation){
         const mesh=new T.Mesh(foundationGeometry(p,foundation),new T.MeshStandardMaterial({color:0x829393,roughness:1}));
-        mesh.name="Foundation";mesh.userData={part:p.id,materialDescription:foundation.material??p.bodyMaterial};
+        mesh.name="Foundation";mesh.userData={part:p.id,materialDescription:foundation.material??p.bodyMaterial,...(p.shape==="circle"?{uvSurface:"cylinder"}:{})};
         group.add(mesh);
       }
       this.solids.add(group);

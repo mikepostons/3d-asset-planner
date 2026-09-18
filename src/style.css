@@ -1133,3 +1133,6 @@ nav button { gap: 8px; }
 .scene-settings-body fieldset { min-width:0; padding:18px; border:1px solid var(--border); border-radius:10px; display:flex; flex-direction:column; gap:16px; }
 .scene-settings-body legend { padding:0 8px; }
 .scene-settings-footer { flex-shrink:0; margin:0; padding:18px 28px; border-top:1px solid var(--border); background:#17252b; }
+
+.cleaner-tabs { padding:0 0 12px; gap:8px; }
+.cleaner-tab-panel { display:flex; flex-direction:column; gap:14px; }

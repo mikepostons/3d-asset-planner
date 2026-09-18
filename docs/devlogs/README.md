@@ -39,3 +39,7 @@ Use `YYYY-MM-DD-short-description.md`. Log meaningful delivered changes and actu
 - [Below-ground foundations](2026-09-18-foundations.md)
 
 - [Scene settings tabs](2026-09-18-scene-settings-tabs.md)
+
+- [Surface-aware UV preparation](2026-09-18-surface-uv-mapping.md)
+
+- [Cleaner inspection and repair](2026-09-18-mesh-repair.md)
