@@ -147,3 +147,13 @@ test("hollow opening reveals project perpendicular to each wall without shrinkin
       g.dispose();
     }
 });
+
+test('fine opening snaps allow valid end-wall moves that coarse grid steps reject',async()=>{
+ const {editOpening}=await import('./openings');const {defaultRoofDetails}=await import('./roof-details');
+ const p=part();p.roofDetails={...defaultRoofDetails(),gableStart:'material',gableStartBaseFloor:1};
+ const o={...opening('window'),face:3,x:1,y:4.5,width:1,height:1};
+ const fine=editOpening(o,'move',.07,.3,.05,0);assert.ok(Math.abs(fine.x-1.05)<1e-8);assert.ok(Math.abs(fine.y-4.8)<1e-8);
+ validate({...fresh(),parts:[{...p,openings:[fine]}]});
+ const coarse=editOpening(o,'move',0,.3,.5,0);assert.throws(()=>validate({...fresh(),parts:[{...p,openings:[coarse]}]}),/fit within/);
+ const precise=editOpening(o,'e',.03,0,.01,0);assert.ok(Math.abs(precise.width-1.03)<1e-8);
+});

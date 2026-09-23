@@ -1,3 +1,6 @@
+import {EndWallControls} from "./EndWallControls";
+import {MaterialDesigner} from "./MaterialDesigner";
+import {applyTextureMaterials,assignedMaterialCount} from "./texture-materials";
 import {FoundationControls} from "./FoundationControls";
 import {foundationDefaults} from "./foundations";
 import {applyPreparedUVs,preparationKey,preparationStatus,cleanerDiagnostics} from "./model-cleaner";
@@ -259,6 +262,7 @@ function App() {
   const [d, setD] = useState<Plan>(initial),
     [selected, setSelected] = useState<string | null>(null),
     [activeCluster, setActiveCluster] = useState<string | null>(null),
+    [materialRoot,setMaterialRoot] = useState<Group | null>(null),
     [cleanerRoot,setCleanerRoot] = useState<Group | null>(null),
     [exportHub,setExportHub] = useState(false),
     [completeExport,setCompleteExport] = useState(false),
@@ -274,6 +278,7 @@ function App() {
     [activeOpening, setActiveOpening] = useState<string | null>(null),
     [openingSelection, setOpeningSelection] = useState<string[]>([]),
     [openingKind, setOpeningKind] = useState<OpeningKind>("door"),
+    [openingSnap, setOpeningSnap] = useState(.05),
     [openingMenu, setOpeningMenu] = useState(false),
     [addShape, setAddShape] = useState<Primitive>("cube"),
     [scaleFactor, setScaleFactor] = useState(1),
@@ -281,6 +286,7 @@ function App() {
     [view, setView] = useState("main"),
     [drawShape, setDrawShape] = useState<"rectangle" | "circle">("rectangle"),
     [floorGuides, setFloorGuides] = useState(true),
+    [texturesVisible, setTexturesVisible] = useState(true),
     [terrainVisible, setTerrainVisible] = useState(true),
     [xray, setXray] = useState(false),
     [exportDialog, setExportDialog] = useState(false),
@@ -375,6 +381,7 @@ function App() {
       stage.current.drawShape = drawShape;
       stage.current.addShape = addShape;
       stage.current.showFloors = floorGuides;
+      stage.current.showTextures = texturesVisible;
       stage.current.showTerrain = terrainVisible;
       stage.current.xray = xray;
       stage.current.activeFace =
@@ -383,6 +390,7 @@ function App() {
       stage.current.selectedOpening = activeOpening;
       stage.current.selectedOpenings = openingSelection;
       stage.current.openingKind = openingKind;
+      stage.current.openingSnap = openingSnap;
       stage.current.update(d, selected, tool);
     }
 
@@ -393,6 +401,7 @@ function App() {
     drawShape,
     addShape,
     floorGuides,
+    texturesVisible,
     terrainVisible,
     xray,
     selectionMode,
@@ -401,6 +410,7 @@ function App() {
     openingSelection,
     activeCluster,
     openingKind,
+    openingSnap,
   ]);
   useEffect(() => {
     const saveRecovery = () => {
@@ -421,6 +431,8 @@ function App() {
       if(!parts.length)throw Error("Select a component, structure or group first.");
       result=stage.current!.modelExport(parts,modelTerrain,modelCentre);
       applyPreparedUVs(result.root,d);
+      await applyTextureMaterials(result.root,d);
+      result.report.materials=assignedMaterialCount(result.root);
       {const stats=cleanerDiagnostics(result.root);result.report.missingUVs=stats.missingUVs;result.report.triangles=stats.triangles;result.report.degenerateTriangles=stats.degenerate;if(!stats.degenerate)result.report.warnings=result.report.warnings.filter(w=>!w.includes("degenerate triangles"));}
       result.report.warnings=result.report.warnings.filter(w=>!w.includes("no UV mapping"));
       if(result.report.missingUVs)result.report.warnings.push(`${result.report.missingUVs} meshes lack UVs.`);
@@ -430,7 +442,7 @@ function App() {
       zip.file(name+".glb",glb);
       zip.file("geometry-report.json",JSON.stringify(result.report,null,2));
       zip.file("source-plan.json",JSON.stringify({...d,parts},null,2));
-      zip.file("README.txt","Untextured structural model. Units: metres, Y up. See geometry-report.json for source origin and geometry warnings. Material descriptions are placeholders, not textures. Original procedural scene is preserved in source-plan.json.");
+      zip.file("README.txt","Structural model with assigned materials and embedded colour textures. Units: metres, Y up. See geometry-report.json for source origin and geometry warnings. Unassigned surfaces retain placeholder materials. Original procedural scene is preserved in source-plan.json.");
       download(await zip.generateAsync({type:"blob"}),name+"-3d.zip");
       setMessage(`3D export downloaded: ${result.report.meshes} meshes, ${result.report.triangles.toLocaleString()} triangles, ${result.report.materials} materials. Includes geometry report and current saved UV preparation. Geometry cleanup is not yet complete.`);
       setModelDialog(false);
@@ -489,7 +501,7 @@ function App() {
         busy ||
         sceneDraft ||
         moduleDialog ||
-        exportHub || modelDialog || !!cleanerRoot || exportDialog ||
+        exportHub || modelDialog || !!cleanerRoot || !!materialRoot || exportDialog ||
         showHelp ||
         libraryModal
       )
@@ -543,7 +555,7 @@ function App() {
       setOpeningSelection(ids);
       setActiveOpening(ids.at(-1) ?? null);
     }
-  }, [d, selected, openingSelection]);
+  }, [d, selected, openingSelection, busy, sceneDraft, moduleDialog, exportHub, modelDialog, cleanerRoot, materialRoot, exportDialog, showHelp, libraryOpen, saveDialog, pendingScene, saving, switching]);
   function camera(v: string) {
     setView(v);
     stage.current?.setView(v, true);
@@ -780,6 +792,8 @@ function App() {
       if(completeExport){
         const model=stage.current.modelExport(d.parts,includeTerrain,true);
         applyPreparedUVs(model.root,d);
+        await applyTextureMaterials(model.root,d);
+        model.report.materials=assignedMaterialCount(model.root);
         {const stats=cleanerDiagnostics(model.root);model.report.missingUVs=stats.missingUVs;model.report.triangles=stats.triangles;model.report.degenerateTriangles=stats.degenerate;if(!stats.degenerate)model.report.warnings=model.report.warnings.filter(w=>!w.includes("degenerate triangles"));}
         model.report.warnings=model.report.warnings.filter(w=>!w.includes("no UV mapping"));
         if(model.report.missingUVs)model.report.warnings.push(`${model.report.missingUVs} meshes lack UVs.`);
@@ -922,7 +936,7 @@ function App() {
         inert={
           !!sceneDraft ||
           moduleDialog ||
-          exportHub || modelDialog || !!cleanerRoot || exportDialog ||
+          exportHub || modelDialog || !!cleanerRoot || !!materialRoot || exportDialog ||
           showHelp ||
           libraryModal
         }
@@ -985,6 +999,7 @@ function App() {
           <button aria-label="Library" title="Library" onClick={() => setLibraryOpen(true)}><ToolIcon name="library" /></button>
           <button className={"scene-save " + (dirty ? "unsaved":"saved")} onClick={save} disabled={saving} title={dirty?"Unsaved changes":"All changes saved"}><ToolIcon name="save" />{saving?"Saving…":dirty?"Save scene":"Saved"}</button>
           <button disabled={busy || !d.parts.length} onClick={()=>{try{const parts=selectedParts(d,selected);const root=stage.current!.modelExport(parts.length?parts:d.parts,false,true).root;applyPreparedUVs(root,d);setCleanerRoot(root);}catch(e){setMessage(String(e));}}}><ToolIcon name="cleaner" />Cleaner</button>
+          <button disabled={busy || !d.parts.length} onClick={()=>{try{const parts=selectedParts(d,selected);const chosen=parts.length?parts:d.parts;if(!preparationStatus(d,chosen.map(p=>p.id)))throw Error("Generate and save UVs in Cleaner for this selection first.");const root=stage.current!.modelExport(chosen,!parts.length,true).root;applyPreparedUVs(root,d);setMaterialRoot(root);}catch(e){setMessage(String(e));}}}>Materials</button>
           <button className="primary" disabled={busy || !d.parts.length} onClick={()=>setExportHub(true)}><ToolIcon name="export" />{busy?"Exporting…":"Export"}</button>
         </nav>
         <input
@@ -1000,7 +1015,7 @@ function App() {
         inert={
           !!sceneDraft ||
           moduleDialog ||
-          exportHub || modelDialog || !!cleanerRoot || exportDialog ||
+          exportHub || modelDialog || !!cleanerRoot || !!materialRoot || exportDialog ||
           showHelp ||
           libraryModal
         }
@@ -1218,6 +1233,14 @@ function App() {
                   Floor guides
                 </button>
                 <button
+                  aria-pressed={texturesVisible}
+                  className={texturesVisible ? "chosen" : ""}
+                  title="Show assigned materials in the editor; exports keep their materials"
+                  onClick={() => setTexturesVisible(!texturesVisible)}
+                >
+                  Textures
+                </button>
+                <button
                   aria-pressed={
                     terrainVisible && (d.terrainLayout ?? "none") !== "none"
                   }
@@ -1305,7 +1328,7 @@ function App() {
           <div className="handle-key">
             <span>
               {tool === "move"
-                ? "Select the centre handle for XYZ arrows · drag centre to move across ground"
+                ? openingSelection.length ? "Drag a window or door to move it along its wall · Shift-click to select several" : "Select the centre handle for XYZ arrows · drag centre to move across ground"
                 : tool === "select"
                   ? selectionMode === "vertices"
                     ? "Vertices · wall corners and ridge endpoints"
@@ -1469,20 +1492,38 @@ function App() {
                         : "Solid body: openings become shallow recesses. Enable Hollow walls for through-openings."}{" "}
                       Select → Faces, click a wall, then use Openings to draw.
                     </p>
+                    <label className="field">Opening snap
+                      <select value={openingSnap} onChange={e=>setOpeningSnap(Number(e.target.value))}>
+                        <option value={.01}>1 cm</option><option value={.025}>2.5 cm</option><option value={.05}>5 cm</option><option value={.1}>10 cm</option><option value={.25}>25 cm</option><option value={.5}>50 cm</option>
+                      </select>
+                    </label>
+                    <p className="micro">Applies to drawing, moving and resizing openings. Hold Alt / Option for 1 cm precision. The building grid stays unchanged.</p>
                     {(p.openings ?? []).map((o) => (
-                      <button
-                        className={
-                          activeOpening === o.id ? "wide chosen" : "wide"
-                        }
-                        key={o.id}
-                        onClick={() => {
-                          setActiveOpening(o.id);
-                          setOpeningSelection([o.id]);
-                          setActiveFace({ partId: p.id, index: o.face });
-                        }}
-                      >
-                        {o.name} · wall {o.face + 1}
-                      </button>
+                      <div className="opening-menu-row" key={o.id}>
+                        <button
+                          className={activeOpening === o.id ? "opening-menu-select chosen" : "opening-menu-select"}
+                          onClick={() => {
+                            setActiveOpening(o.id);
+                            setOpeningSelection([o.id]);
+                            setActiveFace({ partId: p.id, index: o.face });
+                          }}
+                        >
+                          {o.name} · wall {o.face + 1}
+                        </button>
+                        <button
+                          className="danger opening-menu-delete"
+                          aria-label={`Delete ${o.name} on wall ${o.face + 1}`}
+                          title={`Delete ${o.name}`}
+                          onClick={() => {
+                            update({openings: p.openings!.filter(q => q.id !== o.id)});
+                            const remaining = openingSelection.filter(id => id !== o.id);
+                            setOpeningSelection(remaining);
+                            if (activeOpening === o.id) setActiveOpening(remaining[0] ?? null);
+                          }}
+                        >
+                          <ToolIcon name="delete" />
+                        </button>
+                      </div>
                     ))}
                     {(() => {
                       const o = p.openings?.find((o) => o.id === activeOpening);
@@ -1543,7 +1584,7 @@ function App() {
                               value={o.width}
                               min={0.1}
                               max={500}
-                              step={step}
+                              step={openingSnap}
                               onChange={(width) =>
                                 change({
                                   width,
@@ -1558,7 +1599,7 @@ function App() {
                               value={o.height}
                               min={0.1}
                               max={500}
-                              step={step}
+                              step={openingSnap}
                               onChange={(height) =>
                                 change({
                                   height,
@@ -1574,7 +1615,7 @@ function App() {
                             value={o.x}
                             min={0.05}
                             max={500}
-                            step={step}
+                            step={openingSnap}
                             onChange={(x) => change({ x })}
                           />
                           <Num
@@ -1582,7 +1623,7 @@ function App() {
                             value={o.y}
                             min={0}
                             max={500}
-                            step={step}
+                            step={openingSnap}
                             onChange={(y) => change({ y })}
                           />
                           <details className="part-section">
@@ -2128,10 +2169,6 @@ function App() {
                           })}
                           {p.roof==="gable" && <details className="part-section"><summary>Ridge beam</summary><label className="settings-check"><input type="checkbox" checked={p.roofDetails.ridgeBeam??false} onChange={e=>update({roofDetails:{...p.roofDetails!,ridgeBeam:e.target.checked}})}/> Add ridge beam</label>{p.roofDetails.ridgeBeam && <><p className="micro">Extensions are measured beyond the roof ridge ends. Set either extension to zero for no projection at that end.</p><div className="pair">{([["beamWidth","Beam width",.2],["beamHeight","Beam height",.25],["beamStart","End 1 extension",0],["beamEnd","End 2 extension",0],["beamDrop","Drop below ridge",.15]] as const).map(([key,label,fallback])=><Num key={key} label={label} value={p.roofDetails![key]??fallback} min={key==="beamWidth"||key==="beamHeight"?.01:0} max={10} step={.01} onChange={n=>update({roofDetails:{...p.roofDetails!,[key]:n}})}/>)}</div></>}</details>}
 
-                          {p.roof === "gable" && <details className="part-section"><summary>Gable ends</summary>
-                            <label className="settings-check"><input type="checkbox" checked={p.roofDetails.gableSeparate ?? false} onChange={e=>update({roofDetails:{...p.roofDetails!,gableSeparate:e.target.checked,gableEnd:p.roofDetails!.gableEnd??p.roofDetails!.gableStart??"wall",gableEndMaterial:p.roofDetails!.gableEndMaterial??p.roofDetails!.gableStartMaterial}})}/> Set each end separately</label>
-                            {(p.roofDetails.gableSeparate ? [0,1]:[0]).map(end=>{const key=end?"gableEnd":"gableStart",materialKey=end?"gableEndMaterial":"gableStartMaterial";return <div key={end}><label className="field">{p.roofDetails!.gableSeparate?`End ${end+1}`:"Both ends"}<select value={p.roofDetails![key]??"wall"} onChange={e=>update({roofDetails:{...p.roofDetails!,[key]:e.target.value as "wall"|"hidden"|"material"}})}><option value="hidden">Hidden</option><option value="wall">Extend wall</option><option value="material">Separate material</option></select></label>{p.roofDetails![key]==="material" && <label className="field">Gable material<textarea value={p.roofDetails![materialKey]??"Gable cladding"} onChange={e=>update({roofDetails:{...p.roofDetails!,[materialKey]:e.target.value}})}/></label>}</div>})}
-                          </details>}
                           {p.roof === "gable" && <><label className="settings-check"><input type="checkbox" checked={p.roofDetails.ridgeCap} onChange={e=>update({roofDetails:{...p.roofDetails!,ridgeCap:e.target.checked}})}/> Ridge cap</label>
                           {p.roofDetails.ridgeCap && <div className="pair">{([["capWidth","Cap width"],["capHeight","Cap thickness"]] as const).map(([key,label])=><Num key={key} label={label} value={p.roofDetails![key]} min={.01} max={10} step={.01} onChange={n=>update({roofDetails:{...p.roofDetails!,[key]:n}})}/>)}</div>}</>}
                         </>}
@@ -2286,6 +2323,9 @@ function App() {
                     </>
                   )}
                 </details>
+                {p.shape !== "circle" && p.roof === "gable" && p.roofEnabled !== false && (
+                  <EndWallControls part={p} onChange={roofDetails=>update({roofDetails})}/>
+                )}
                 <details className="part-section">
                   <summary>Subdivisions</summary>
                   <label className="settings-check">
@@ -2739,13 +2779,14 @@ function App() {
           </button>
         </div>
       )}
+      {materialRoot && <MaterialDesigner root={materialRoot} plan={d} projectId={savedReference?.projectId??null} onClose={()=>setMaterialRoot(null)} onSave={async (materialAssignments,materialOverrides)=>{const next={...live.current,materialAssignments,materialOverrides};commit(next);return await persist(next.name,undefined,next);}}/>}
       {cleanerRoot && <ModelCleaner root={cleanerRoot} prepared={preparationStatus(d,(selectedParts(d,selected).length?selectedParts(d,selected):d.parts).map(p=>p.id)) && new Set((selectedParts(d,selected).length?selectedParts(d,selected):d.parts).map(p=>d.preparedUVs?.[p.id]?.metresPerTile)).size===1} initialScale={d.preparedUVs?.[(selectedParts(d,selected)[0]??d.parts[0])?.id]?.metresPerTile??1} onSave={async (scale,repair)=>{const parts=selectedParts(d,selected);const next=clone(live.current);next.preparedUVs={...next.preparedUVs};for(const p of parts.length?parts:d.parts)next.preparedUVs[p.id]={sourceKey:preparationKey(next),metresPerTile:scale,repair:repair||next.preparedUVs[p.id]?.repair};commit(next);return await persist(next.name,undefined,next);}} onClose={()=>setCleanerRoot(null)}/>}
       {exportHub && <div className="modal-backdrop"><section className="modal export-hub" role="dialog" aria-modal="true" aria-label="Export"><h2><ToolIcon name="export" /> Export</h2><p>References come directly from your scene. Model exports automatically use saved, up-to-date Cleaner UVs.</p>{!preparationStatus(d,d.parts.map(p=>p.id)) && <p className="export-warning" role="status">Some components have not been prepared in Cleaner, or their geometry has changed. You can export now, but those components will use their original UVs.</p>}<div className="export-grid">
         <button onClick={()=>{setCompleteExport(false);setExportHub(false);setExportDialog(true);}}><ToolIcon name="package" /><strong>Export Reference Package</strong><span>Nine views, source plan, brief and manifest.</span></button>
         <button onClick={()=>{setExportHub(false);setModelDialog(true);}}><ToolIcon name="export" /><strong>Export Model</strong><span>Structural GLB with scope, terrain and origin options.</span></button>
-        <button onClick={()=>{setCompleteExport(true);setExportHub(false);setExportDialog(true);}}><ToolIcon name="package" /><strong>Export Complete Package</strong><span>Scene GLB, geometry report and all reference files. Includes saved UV preparation where current. No textures.</span></button>
+        <button onClick={()=>{setCompleteExport(true);setExportHub(false);setExportDialog(true);}}><ToolIcon name="package" /><strong>Export Complete Package</strong><span>Scene GLB, geometry report and all reference files. Includes saved UV preparation where current. Includes assigned colour textures.</span></button>
       </div><button className="cleaner-close" aria-label="Close Export" title="Close Export" onClick={()=>setExportHub(false)}>×</button></section></div>}
-      {modelDialog && <div className="modal-backdrop"><section className="modal" role="dialog" aria-modal="true" aria-label="Export 3D model"><h2>Export 3D model</h2><p>GLB model with material placeholders, saved UV preparation and a geometry report.</p>{!preparationStatus(d,(modelScope==="selection"?selectedParts(d,selected):d.parts).map(p=>p.id)) && <p className="export-warning">This selection has missing or outdated Cleaner preparation. Export will retain original UVs for those parts.</p>}<label className="field">Export scope<select value={modelScope} onChange={e=>setModelScope(e.target.value)}><option value="scene">Whole scene</option><option value="selection" disabled={!selectedParts(d,selected).length}>Selected component / structure / group</option></select></label><label className="settings-check"><input type="checkbox" checked={modelTerrain} onChange={e=>setModelTerrain(e.target.checked)}/> Include configured terrain</label><label className="settings-check"><input type="checkbox" checked={modelCentre} onChange={e=>setModelCentre(e.target.checked)}/> Centre origin at the base of the exported structures</label><p className="micro">Separate named parts are preserved. Editor guides and selection highlights are excluded.</p><button disabled={busy} onClick={()=>setModelDialog(false)}>Cancel</button><button className="primary" disabled={busy} onClick={exportModel}>{busy?"Exporting…":"Download GLB package"}</button></section></div>}
+      {modelDialog && <div className="modal-backdrop"><section className="modal" role="dialog" aria-modal="true" aria-label="Export 3D model"><h2>Export 3D model</h2><p>GLB model with assigned materials, embedded colour textures, saved UV preparation and a geometry report.</p>{!preparationStatus(d,(modelScope==="selection"?selectedParts(d,selected):d.parts).map(p=>p.id)) && <p className="export-warning">This selection has missing or outdated Cleaner preparation. Export will retain original UVs for those parts.</p>}<label className="field">Export scope<select value={modelScope} onChange={e=>setModelScope(e.target.value)}><option value="scene">Whole scene</option><option value="selection" disabled={!selectedParts(d,selected).length}>Selected component / structure / group</option></select></label><label className="settings-check"><input type="checkbox" checked={modelTerrain} onChange={e=>setModelTerrain(e.target.checked)}/> Include configured terrain</label><label className="settings-check"><input type="checkbox" checked={modelCentre} onChange={e=>setModelCentre(e.target.checked)}/> Centre origin at the base of the exported structures</label><p className="micro">Separate named parts are preserved. Editor guides and selection highlights are excluded.</p><button disabled={busy} onClick={()=>setModelDialog(false)}>Cancel</button><button className="primary" disabled={busy} onClick={exportModel}>{busy?"Exporting…":"Download GLB package"}</button></section></div>}
       {moduleDialog && (
         <div className="modal-backdrop">
           <section

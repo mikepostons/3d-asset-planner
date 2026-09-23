@@ -1,3 +1,4 @@
+import {validateTextureMaterial,type TextureMaterial} from "../src/texture-material-model";
 import { DatabaseSync } from "node:sqlite";
 import { randomUUID } from "node:crypto";
 import { validate } from "../src/model";
@@ -6,10 +7,34 @@ export class Library {
   constructor(path: string) {
     this.db = new DatabaseSync(path);
     this.db.exec(`PRAGMA foreign_keys=ON; PRAGMA busy_timeout=3000;
+ CREATE TABLE IF NOT EXISTS materials(id TEXT PRIMARY KEY,record TEXT NOT NULL);
  CREATE TABLE IF NOT EXISTS projects(id TEXT PRIMARY KEY,name TEXT NOT NULL);
  CREATE TABLE IF NOT EXISTS scenes(id TEXT PRIMARY KEY,name TEXT NOT NULL,project_id TEXT REFERENCES projects(id),plan TEXT NOT NULL,version INTEGER NOT NULL,updated_at TEXT NOT NULL);
  PRAGMA user_version=1;`);
   }
+  materials(){return this.db.prepare("SELECT record FROM materials ORDER BY rowid DESC").all().map(r=>JSON.parse(r.record as string));}
+  materialUsage(id:string){return this.db.prepare("SELECT id,name,plan FROM scenes").all().flatMap(r=>{
+    const plan=JSON.parse(r.plan as string);
+    const surfaces=Object.entries(plan.materialAssignments??{}).filter(([,material])=>material===id).map(([key])=>{
+      const split=key.indexOf(":"),partId=key.slice(0,split),surface=key.slice(split+1);
+      return {key,partId,partName:plan.parts.find((p:any)=>p.id===partId)?.name??(partId==="terrain"?"Terrain":"Missing component"),surface};
+    });
+    return surfaces.length?[{id:String(r.id),name:String(r.name),surfaces}]:[];
+  });}
+  archiveMaterial(id:string,archived=true){
+    const material=this.materials().find(m=>m.id===id);if(!material)throw Error("Material not found.");
+    const next={...material,archived};
+    this.db.prepare("UPDATE materials SET record=? WHERE id=?").run(JSON.stringify(next),id);
+    return next;
+  }
+  createMaterial(value:TextureMaterial){
+    const previous=value.parentId?this.materials().find(m=>m.id===value.parentId):undefined;
+    if(value.parentId&&!previous)throw Error("Previous material version no longer exists.");
+    const id=randomUUID();const m=validateTextureMaterial({...value,archived:false,id,familyId:previous?.familyId??previous?.id??id,version:previous?Math.max(...this.materials().filter(r=>(r.familyId??r.id)===(previous.familyId??previous.id)).map(r=>r.version??1))+1:1});
+    for(const project of m.projectIds??[])if(!this.db.prepare("SELECT id FROM projects WHERE id=?").get(project))throw Error("A selected project no longer exists.");
+    this.db.prepare("INSERT INTO materials VALUES (?,?)").run(m.id,JSON.stringify(m));return m;
+  }
+
   projects() {
     return this.db
       .prepare("SELECT id,name FROM projects ORDER BY name COLLATE NOCASE")

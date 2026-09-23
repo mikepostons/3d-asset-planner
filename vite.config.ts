@@ -36,11 +36,17 @@ function localLibrary(): Plugin {
           let raw = "";
           for await (const chunk of req) {
             raw += chunk;
-            if (Buffer.byteLength(raw) > 2_000_000)
+            if (Buffer.byteLength(raw) > (path === "/materials" ? 78_000_000 : 2_000_000))
               return send(413, { error: "Scene is too large." });
           }
           body = JSON.parse(raw);
         }
+        const materialAction=path.match(/^\/materials\/([\w-]+)\/(archive|restore)$/);
+        if(materialAction&&req.method==="POST")return send(200,db.archiveMaterial(materialAction[1],materialAction[2]==="archive"));
+        const usage=path.match(/^\/materials\/([\w-]+)\/usage$/);
+        if(usage&&req.method==="GET")return send(200,db.materialUsage(usage[1]));
+        if(path === "/materials" && req.method === "GET") return send(200,db.materials());
+        if(path === "/materials" && req.method === "POST") return send(201,db.createMaterial(body));
         if (path === "/projects" && req.method === "GET")
           return send(200, db.projects());
         if (path === "/projects" && req.method === "POST")

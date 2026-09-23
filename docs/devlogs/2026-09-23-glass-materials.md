@@ -1,0 +1,7 @@
+# Glass materials — 23 September 2026
+
+Material library records now support Standard or Glass. Glass defaults to roughness 0.15, transparency 0.65 and reflection strength 0.5. Creator/editor exposes these fields with colour tint. Material Designer supports per-surface type, transparency, reflection and roughness overrides alongside existing tint controls. Assign to Glass pane surfaces to leave frames/bars independent; the existing surface identity groups panes within each component.
+
+Glass uses a dielectric MeshPhysicalMaterial, alpha blending, zero metalness, IOR 1.5 and adjustable specular intensity. This is lightweight transparent glass, not refractive transmission. Neutral locally generated RoomEnvironment reflections are used in the editor and Designer and disposed with their renderers. No remote images/services needed. GLB material conversion uses the same assigned physical materials; importer support for specular extensions and Unity lighting affects the final appearance. The preview environment itself is not exported.
+
+Validation: 121 tests passed, including glass overrides, transparency/depth-write behaviour and invalid values; build passed with existing bundle warnings. Restarted the stopped local server and verified the isolated editor loads with the reflection environment. Glass appearance and Unity import still require visual review. No production scene/library edits.

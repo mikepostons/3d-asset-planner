@@ -1,9 +1,12 @@
+import {type Platform,validatePlatform,scalePlatform} from "./platforms";
 import { ConvexGeometry } from "three/addons/geometries/ConvexGeometry.js";
 import * as T from "three";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { height, footprint, ridgeEnds, type Part } from "./model";
 export type FasciaSettings = {lengthOffset?:number; height:number; depth:number; inset:number; drop:number};
 export type RoofDetails = {
+  platformStart?:Platform; platformEnd?:Platform;
+  gableStartBaseFloor?:number; gableEndBaseFloor?:number;
   sideFascia?: FasciaSettings; endFascia?: FasciaSettings;
   ridgeBeam?: boolean; beamWidth?: number; beamHeight?: number; beamStart?: number; beamEnd?: number; beamDrop?: number;
   fasciaInset?: number;
@@ -19,6 +22,7 @@ export function validateRoofDetails(p: Part) {
   if (!d) return;
   for (const [key,value] of Object.entries(d)) {
     if (value === undefined && !(key in defaultRoofDetails())) continue;
+    if(key === "platformStart" || key === "platformEnd"){validatePlatform(value as Platform);continue;}
     if (key === "sideFascia" || key === "endFascia") {
       if (value && typeof value === "object" && "lengthOffset" in value && value.lengthOffset !== undefined && (typeof value.lengthOffset !== "number" || !Number.isFinite(value.lengthOffset) || Math.abs(value.lengthOffset)>10)) throw Error("Invalid fascia length offset.");
       if (!value || typeof value !== "object" || ["height","depth","inset","drop"].some(k=>typeof (value as any)[k]!=="number" || !Number.isFinite((value as any)[k]) || (value as any)[k]<(k==="height"||k==="depth"?.01:0) || (value as any)[k]>10)) throw Error("Invalid fascia settings."); continue;
@@ -36,6 +40,7 @@ export function validateRoofDetails(p: Part) {
 }
 export function scaleRoofDetails(p: Part, factor: number) {
   if (p.roofDetails) for (const key of Object.keys(p.roofDetails) as (keyof RoofDetails)[]) {
+    if(key === "platformStart" || key === "platformEnd"){const platform=p.roofDetails[key];if(platform)scalePlatform(platform,factor);}
     if (["thickness","sides","start","end","fasciaHeight","fasciaDepth","capWidth","capHeight","fasciaInset","beamWidth","beamHeight","beamStart","beamEnd","beamDrop"].includes(key)) (p.roofDetails as unknown as Record<string,number>)[key] *= factor;
     if (key === "sideFascia" || key === "endFascia") { const v=p.roofDetails[key]; if(v) { for(const k of ["height","depth","inset","drop"] as const) v[k]*=factor; if(v.lengthOffset!==undefined) v.lengthOffset*=factor; } }
   }
@@ -75,7 +80,9 @@ export function detailedRoof(p: Part, base: (p:Part, roof:boolean)=>T.BufferGeom
       const edge=edgeMap.get(k); if(edge) edge.count++; else edgeMap.set(k,{a,b,count:1});
     }
   }
+  const edgeStart=vertices.length/3;
   const extras:T.BufferGeometry[]=[];
+  const extraNames:string[]=[];
   for(const edge of edgeMap.values()) if(edge.count===1) {
     const {a,b}=edge,up=new T.Vector3(0,d.thickness,0),at=a.clone().add(up),bt=b.clone().add(up);
     tri(a,b,bt);tri(a,bt,at);
@@ -91,9 +98,10 @@ export function detailedRoof(p: Part, base: (p:Part, roof:boolean)=>T.BufferGeom
       if(a.distanceTo(b)+2*lengthOffset<=.001) continue;
       const ends=[a.clone().addScaledVector(direction,-lengthOffset),b.clone().addScaledVector(direction,lengthOffset)];
       for(const v of ends) for(const offset of [f.inset,f.inset+f.depth]) for(const drop of [f.drop,f.drop+f.height]) points.push(v.clone().addScaledVector(inward,offset).add(new T.Vector3(0,-drop,0)));
-      const board=new ConvexGeometry(points);board.deleteAttribute("uv");extras.push(board);
+      const board=new ConvexGeometry(points);board.deleteAttribute("uv");extras.push(board);extraNames.push(isSide ? "Side fascia" : "End fascia");
     }
   }
+  const capStart=vertices.length/3;
   if(d.ridgeCap && p.roof==="gable") {
     const ends=ridgeEnds(q).map(([x,y,z])=>new T.Vector3(x*q.width,height(q)+y,z*q.depth));
     ends.forEach(v=>v[alongX?"x":"z"]+=shift);
@@ -120,6 +128,7 @@ export function detailedRoof(p: Part, base: (p:Part, roof:boolean)=>T.BufferGeom
     }
   }
 
+  const capEnd=vertices.length/3;
   if(d.ridgeBeam && p.roof==="gable") {
     const ends=ridgeEnds(q).map(([x,y,z])=>new T.Vector3(x*q.width,height(q)+y,z*q.depth));
     ends.forEach(v=>v[alongX?"x":"z"]+=shift);
@@ -129,10 +138,14 @@ export function detailedRoof(p: Part, base: (p:Part, roof:boolean)=>T.BufferGeom
     const width=d.beamWidth??.2, bh=d.beamHeight??.25;
     const points:T.Vector3[]=[];
     for(const v of ends) for(const side of [-.5,.5]) for(const down of [0,bh]) points.push(v.clone().addScaledVector(across,width*side).add(new T.Vector3(0,-(d.beamDrop??.15)-down,0)));
-    const g=new ConvexGeometry(points);g.deleteAttribute("uv");extras.push(g);
+    const g=new ConvexGeometry(points);g.deleteAttribute("uv");extras.push(g);extraNames.push("Ridge beam");
   }
   const skin=new T.BufferGeometry();skin.setAttribute("position",new T.Float32BufferAttribute(vertices,3));skin.computeVertexNormals();
   const result=mergeGeometries([skin,...extras]);
+  const ranges=[{name:"Roof",start:0,count:edgeStart},{name:"Roof edges",start:edgeStart,count:capStart-edgeStart}];
+  if(capEnd>capStart)ranges.push({name:"Ridge cap",start:capStart,count:capEnd-capStart});
+  let cursor=capEnd;extras.forEach((g,i)=>{const count=g.getAttribute("position").count;ranges.push({name:extraNames[i],start:cursor,count});cursor+=count;});
+  result.userData.roofSurfaces=ranges;
   source.dispose();mesh.material.dispose();skin.dispose();extras.forEach(g=>g.dispose());
   return result;
 }
@@ -164,4 +177,21 @@ export function gableInfill(p: Part, roof: T.BufferGeometry) {
     if(points.length>=6)result.push({geometry:new ConvexGeometry(points),mode,material:(end&&d.gableSeparate?d.gableEndMaterial:d.gableStartMaterial)??"Gable cladding",end});
   }
   mesh.material.dispose();return result;
+}
+
+/** Separate material surfaces without altering roof geometry or its editing controls. */
+export function splitRoofSurfaces(source:T.BufferGeometry) {
+ const ranges=source.userData.roofSurfaces as {name:string;start:number;count:number}[]|undefined;
+ if(!ranges)return [{name:"Roof",geometry:source}];
+ const grouped=new Map<string,number[]>();
+ for(const range of ranges){const values=grouped.get(range.name)??[];for(let i=range.start;i<range.start+range.count;i++)values.push(i);grouped.set(range.name,values);}
+ const result=[...grouped].map(([name,indices])=>{
+  const geometry=new T.BufferGeometry();
+  for(const [key,attribute] of Object.entries(source.attributes)) {
+   const values=indices.flatMap(i=>Array.from({length:attribute.itemSize},(_,j)=>attribute.array[i*attribute.itemSize+j]));
+   geometry.setAttribute(key,new T.Float32BufferAttribute(values,attribute.itemSize));
+  }
+  return {name,geometry};
+ });
+ source.dispose();return result;
 }

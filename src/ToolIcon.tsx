@@ -1,5 +1,6 @@
 import React from "react";
 const paths: Record<string, string> = {
+  delete: "M3 6h18 M9 6V3h6v3 M5 6l1 15h12l1-15 M10 10v7 M14 10v7",
   new: "M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0 M12 7v10 M7 12h10",
   library: "M4 4h4v16H4z M10 4h4v16h-4z M16 5l4-1 3 15-4 1z",
   save: "M4 3h13l4 4v14H3V3z M7 3v6h10V3 M7 21v-8h10v8",

@@ -64,6 +64,8 @@ export type Plan = {
   front: number;
   terrain: "full" | "minimal" | "none";
   notes: string;
+  materialOverrides?: Record<string,{scale?:number;rotation?:number;kind?:"standard"|"glass";transparency?:number;reflection?:number;roughness?:number;tint?:string;tintOpacity?:number;offsetX?:number;offsetY?:number}>;
+  materialAssignments?: Record<string,string>;
   preparedUVs?: Record<string,{sourceKey:string;metresPerTile:number;repair?:boolean}>;
   terrainMaterial?: MaterialDescription;
   parts: Part[];
@@ -261,6 +263,8 @@ export function validate(raw: unknown): Plan {
   if(d.structureFoundations) Object.values(d.structureFoundations).forEach(validateFoundation);
   if (d.terrainMargin !== undefined && !num(d.terrainMargin, 0.25, 30))
     throw Error("Invalid terrain margin.");
+  if(d.materialOverrides)for(const v of Object.values(d.materialOverrides)){if(!v || v.kind!==undefined&&!["standard","glass"].includes(v.kind) || [v.transparency,v.reflection,v.roughness].some(n=>n!==undefined&&(!Number.isFinite(n)||n<0||n>1)) || v.tintOpacity!==undefined&&(!Number.isFinite(v.tintOpacity)||v.tintOpacity<0||v.tintOpacity>1) || [v.offsetX,v.offsetY].some(n=>n!==undefined&&(!Number.isFinite(n)||Math.abs(n)>1000)) || v.scale!==undefined&&(!Number.isFinite(v.scale)||v.scale<=0||v.scale>100)||v.rotation!==undefined&&!Number.isFinite(v.rotation)||v.tint!==undefined&&!/^#[0-9a-f]{6}$/i.test(v.tint))throw Error("Invalid material overrides.");}
+  if(d.materialAssignments && (typeof d.materialAssignments!=="object" || Object.values(d.materialAssignments).some(v=>typeof v!=="string"||!/^[-\w]+$/.test(v))))throw Error("Invalid material assignments.");
   if(d.preparedUVs && (typeof d.preparedUVs!=="object" || Object.values(d.preparedUVs).some(v=>!v || (v.repair!==undefined && typeof v.repair!=="boolean") || typeof v.sourceKey!=="string" || !Number.isFinite(v.metresPerTile) || v.metresPerTile<=0))) throw Error("Invalid saved UV preparation.");
   let ids = new Set();
   for (const p of d.parts) {

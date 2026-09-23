@@ -264,10 +264,11 @@ export function scaleOpenings(p: Part, factor: number) {
   });
 }
 // Rebuild wall surfaces around editable contours; no accumulated boolean operations.
-export function openingBodyGeometry(p: Part): T.BufferGeometry {
+export function openingBodyGeometry(p: Part, tops:Record<number,T.Vector2[]> = {}): T.BufferGeometry {
   const positions: number[] = [];
   const tri = (a: T.Vector3, b: T.Vector3, c: T.Vector3) =>
-    positions.push(...a.toArray(), ...b.toArray(), ...c.toArray());
+    // Wall-local contours use U/right and Y/up; reverse for outward-facing exterior walls.
+    positions.push(...a.toArray(), ...c.toArray(), ...b.toArray());
   const quad = (a: T.Vector3, b: T.Vector3, c: T.Vector3, d: T.Vector3) => {
     tri(a, b, c);
     tri(a, c, d);
@@ -301,8 +302,7 @@ export function openingBodyGeometry(p: Part): T.BufferGeometry {
     }
     contour.push(
       new T.Vector2(f.length, f.baseB),
-      new T.Vector2(f.length, f.topB),
-      new T.Vector2(0, f.topA),
+      ...(tops[i] ?? [new T.Vector2(0,f.topA),new T.Vector2(f.length,f.topB)]).slice().reverse(),
     );
     const holes = ops.filter((o) => !notches.includes(o)).map(openingOutline),
       all = [...contour, ...holes.flat()];
@@ -322,9 +322,9 @@ export function openingBodyGeometry(p: Part): T.BufferGeometry {
       const left = inset[i].clone().sub(f.a).dot(f.u);
       const right = inset[j].clone().sub(f.a).dot(f.u);
       const innerContour = contour.map((v, index) => {
-        if (index === 0 || index === contour.length - 1)
+        if (Math.abs(v.x)<1e-6)
           return new T.Vector2(left, v.y);
-        if (index === contour.length - 2 || index === contour.length - 3)
+        if (Math.abs(v.x-f.length)<1e-6)
           return new T.Vector2(right, v.y);
         return v.clone();
       });
@@ -360,13 +360,10 @@ export function openingBodyGeometry(p: Part): T.BufferGeometry {
             ]),
           );
     }
-    if (p.hollowWalls)
-      quad(
-        f.point(0, f.topA),
-        f.point(f.length, f.topB),
-        inner(f.length, f.topB),
-        inner(0, f.topA),
-      );
+    if(p.hollowWalls){
+      const top=tops[i]??[new T.Vector2(0,f.topA),new T.Vector2(f.length,f.topB)];
+      for(let k=0;k<top.length-1;k++){const a=top[k],b=top[k+1];quad(f.point(a.x,a.y),f.point(b.x,b.y),inner(b.x,b.y),inner(a.x,a.y));}
+    }
   }
   const base = frames.map((f) => f.point(0, f.baseA)),
     bottom = base.map((v) => v.clone().add(new T.Vector3(0, -0.12, 0)));
@@ -375,8 +372,8 @@ export function openingBodyGeometry(p: Part): T.BufferGeometry {
     tri(bottom[0], bottom[i + 1], bottom[i]);
   }
   for (let i = 0; i < 4; i++)
-    quad(base[i], base[(i + 1) % 4], bottom[(i + 1) % 4], bottom[i]);
-  if (!p.hollowWalls) {
+    quad(base[i], bottom[i], bottom[(i + 1) % 4], base[(i + 1) % 4]);
+  if (!p.hollowWalls && !Object.keys(tops).length) {
     const top = frames.map((f) => f.point(0, f.topA));
     for (let i = 1; i < 3; i++) tri(top[0], top[i], top[i + 1]);
   }

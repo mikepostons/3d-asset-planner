@@ -1,3 +1,4 @@
+import {profiledWallGeometry} from "./end-walls";
 import { detailedRoof } from "./roof-details";
 import { openingBodyGeometry } from "./openings";
 import { ConvexGeometry } from "three/addons/geometries/ConvexGeometry.js";
@@ -20,9 +21,23 @@ function clip(points: Point[], axis: number, positive: boolean): Point[] {
 }
 export function partGeometry(p: Part, roof: boolean): T.BufferGeometry {
   if (roof && p.roofEnabled !== false && p.roofDetails && p.shape !== "circle") return detailedRoof(p, basePartGeometry);
-  return basePartGeometry(p, roof);
+  const geometry=basePartGeometry(p, roof);
+  if(roof && p.roof==="lean-to") {
+    const pos=geometry.getAttribute("position"),ranges:{name:string;start:number;count:number}[]=[];
+    if(pos)for(let i=0;i<pos.count;i+=3){
+      const a=new T.Vector3().fromBufferAttribute(pos,i),b=new T.Vector3().fromBufferAttribute(pos,i+1),c=new T.Vector3().fromBufferAttribute(pos,i+2);
+      const name=Math.abs(b.sub(a).cross(c.sub(a)).y)<1e-8?"Roof edges":"Roof";
+      const last=ranges.at(-1);if(last?.name===name)last.count+=3;else ranges.push({name,start:i,count:3});
+    }
+    geometry.userData.roofSurfaces=ranges;
+  }
+  return geometry;
 }
 function basePartGeometry(p: Part, roof: boolean): T.BufferGeometry {
+  if(!roof && p.shape!=="circle" && (p.roof==="gable" || p.roof==="lean-to") && p.roofEnabled!==false && p.roofDetails){
+    const q={...p,roofDetails:{...p.roofDetails,fascia:false,ridgeCap:false,ridgeBeam:false}};
+    const skin=detailedRoof(q,basePartGeometry);const result=profiledWallGeometry(p,skin);skin.dispose();return result;
+  }
   if (!roof && (p.hollowWalls || p.openings?.length))
     return openingBodyGeometry(p);
   if (roof && p.roofEnabled === false) return new T.BufferGeometry();
@@ -140,7 +155,8 @@ function basePartGeometry(p: Part, roof: boolean): T.BufferGeometry {
         top ? y(q) : bottom(q),
         q[1],
       ]);
-      tri(pts[0], pts[1], pts[2]);
+      if (top) tri(pts[0], pts[2], pts[1]);
+      else tri(pts[0], pts[1], pts[2]);
     }
   };
   surf(points, false);
@@ -167,8 +183,8 @@ function basePartGeometry(p: Part, roof: boolean): T.BufferGeometry {
         bb = [d[0], bottom(d), d[1]],
         cc = [d[0], y(d), d[1]],
         dd = [c[0], y(c), c[1]];
-      tri(aa, bb, cc);
-      tri(aa, cc, dd);
+      tri(aa, cc, bb);
+      tri(aa, dd, cc);
     }
   }
   const g = new T.BufferGeometry();

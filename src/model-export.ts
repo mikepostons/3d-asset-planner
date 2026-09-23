@@ -29,7 +29,8 @@ export function prepareModelExport(solids:T.Group, terrain:T.Group|undefined, pl
       for(let i=0;i<count;i+=3){a.fromBufferAttribute(pos,geometry.index?.getX(i)??i);b.fromBufferAttribute(pos,geometry.index?.getX(i+1)??i+1);c.fromBufferAttribute(pos,geometry.index?.getX(i+2)??i+2);if(b.sub(a).cross(c.sub(a)).lengthSq()<1e-16)report.degenerateTriangles++;}
     }else target=new T.Group();
     target.name=source.name;target.position.copy(source.position);target.quaternion.copy(source.quaternion);target.scale.copy(source.scale);
-    target.userData=JSON.parse(JSON.stringify(source.userData));parent.add(target);
+    target.userData=JSON.parse(JSON.stringify(source.userData));
+    if(source instanceof T.Mesh)target.userData.surfaceKey=source.userData.surfaceKey ?? `${source.userData.part ?? "terrain"}:${source.name || "Surface"}`;parent.add(target);
     for(const child of source.children)copy(child,target);
   };
   for(const group of solids.children)copy(group,root);
@@ -45,8 +46,9 @@ export function prepareModelExport(solids:T.Group, terrain:T.Group|undefined, pl
       else if(data.openingId){const o=part.openings?.find(o=>o.id===data.openingId);parent=folder(folder(node,"Openings"),`${o?.name || "Opening"} ${(part.openings?.findIndex(o=>o.id===data.openingId)??0)+1}`);if(data.architecturalDetail)parent=folder(parent,"Surrounds");}
       else if(child.name==="Quoin")parent=folder(node,"Quoins");
       else if(data.stoneDressing)parent=folder(node,"Stone end bands");
+      else if(data.platformEnd!==undefined)parent=folder(node,`End ${data.platformEnd+1} platform`);
       else if(data.gableEnd!==undefined)parent=folder(node,"Gable ends");
-      else if(child.name==="Roof")parent=folder(node,"Roof assembly");
+      else if(["Roof","Roof edges","Side fascia","End fascia","Ridge cap","Ridge beam"].includes(child.name))parent=folder(node,"Roof assembly");
       if(parent!==node)parent.add(child);
     }
     if(part.groupId){const group=plan.groups?.find(g=>g.id===part.groupId);folder(root,group?.name || "Group").add(node);}
@@ -61,4 +63,4 @@ export function prepareModelExport(solids:T.Group, terrain:T.Group|undefined, pl
   return {root,report};
 }
 export async function encodeGLB(root:T.Object3D){return await new GLTFExporter().parseAsync(root,{binary:true,onlyVisible:true}) as ArrayBuffer;}
-export function disposeExport(root:T.Object3D){const materials=new Set<T.Material>();root.traverse(o=>{if(o instanceof T.Mesh){o.geometry.dispose();for(const m of Array.isArray(o.material)?o.material:[o.material])materials.add(m);}});materials.forEach(m=>m.dispose());}
+export function disposeExport(root:T.Object3D){const materials=new Set<T.Material>();root.traverse(o=>{if(o instanceof T.Mesh){o.geometry.dispose();for(const m of Array.isArray(o.material)?o.material:[o.material])materials.add(m);}});materials.forEach(m=>{if(m instanceof T.MeshStandardMaterial)for(const texture of [m.map,m.normalMap,m.roughnessMap,m.metalnessMap,m.aoMap])texture?.dispose();m.dispose();});}

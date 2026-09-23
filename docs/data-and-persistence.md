@@ -154,3 +154,30 @@ changes in connectivity can change the structure ID, as with existing aspect ove
 
 Prepared UV records may include `repair: true`. This runs conservative mesh repair
 before UV generation and attribute-aware welding afterward on the export copy.
+
+### Texture materials
+SQLite `materials(id, record)` stores immutable material records including image data.
+Scene `materialAssignments` maps component-ID:surface-name keys to material IDs.
+JSON alone does not transfer library textures; back up the database for editable
+project transfer. Exported GLBs embed colour textures. Test routes use isolated storage.
+
+Material records optionally store keywords, projectIds (empty = global), familyId,
+parentId, version, four additional map images and map strengths. Revisions get new
+IDs and do not mutate existing assignments. Legacy entries behave as global v1.
+Plan.materialOverrides stores per-surface scale/rotation/tint independent of the
+shared record. Material requests permit up to 65 MB JSON for five image slots; scene
+requests retain their existing limit. Usage queries inspect saved scene bindings.
+
+Texture materials and per-surface `materialOverrides` may include `offsetX` and
+`offsetY` in texture-repeat units. Both default to zero for existing records and
+accept finite signed values from -1000 to 1000. No schema migration is needed.
+All map slots share the scale, rotation and offsets in previews and GLB export.
+
+Material records may carry `archived: true` after library deletion. Archive/restore
+changes only this flag; saved scenes, material IDs and texture payloads remain intact.
+The materials API returns archived records for rendering, while pickers filter them.
+Usage responses include surface keys, part IDs/names and surface names per saved scene.
+
+Materials optionally store `bumpImage` and `bumpStrength` (0–5, default 1). Six image slots retain the per-image 12-million-character limit; material POST requests allow 78 MB. Height maps convert to OpenGL normals at render/export time when no normalImage exists; source height remains stored. The stock import manifest is outside the repository in RESOURCES/MATERIALS/STOCK.
+
+`roofDetails.gableStartBaseFloor` / `gableEndBaseFloor` are optional decimal floor levels for separate cladding; omission means eaves. `platformStart` / `platformEnd` optionally store enabled, floor, depth, thickness, railings, railHeight, supports and postSize. Floor levels are relative to the component base. Width is derived from the end face. Dimensions scale with the part; dimensionless floor levels do not. Existing gable wall/material/hidden values remain supported.

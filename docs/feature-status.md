@@ -228,3 +228,48 @@ seamless tiling across cone seams remain outside this stage.
 Cleaner offers independent wireframe, problem-edge highlights, conservative per-mesh
 repair, before/after counts and reset. Saved repairs reapply during model exports.
 Boolean merging, subdivision application and face-orientation correction remain pending.
+
+### Material Designer
+Materials opens a separate texture preview for prepared selections/scenes. Reusable
+local materials support colour-image import, tint, roughness, tile size and rotation,
+with per-component surface-role assignments. GLB exports embed assigned colour maps.
+The main editor previews assigned materials after applying assignments. X-ray and reference images retain structural blockout colours.
+
+Materials Manager provides keyword search, thumbnails, multi-project availability,
+immutable revisions and saved-scene usage counts. Designer supports click-to-select
+surface categories and local scale/rotation/tint overrides. Base colour, normal,
+roughness, metallic and AO maps are supported in preview/model export.
+
+### Material library layout and placement
+
+Materials Manager opens as a searchable grid. A selected record opens a compact editing sidebar, with a dedicated Create New form, accordion sections and fixed save actions. Material Designer offers scale, horizontal/vertical position, rotation and tint per surface. Library defaults and scene overrides apply the same transform to all maps; negative positions are supported. Positions are texture-repeat units, not world metres.
+
+Materials can be deleted from the library with scene/part/surface usage confirmation and session Undo. Assigned versions are retained internally so existing models and exports remain intact.
+
+### Bump maps and stock textures
+Material Manager supports bump/height uploads with strength control. Bump-only materials generate normal textures for consistent preview and GLB export; supplied normal maps take precedence. Stock sets can be imported with searchable tags and preserved source provenance.
+
+Roof construction details are separate Material Designer targets: side fascia, end fascia, ridge cap and ridge beam. These export as named meshes under Roof assembly.
+
+### End walls and platforms
+Detailed gable roofs support continuous end walls or separate cladding down to a decimal floor level, with independent end settings. Optional full-width end platforms have projection/level controls, timber X-braced railings and support posts. Platform width tracks wall width; generated surfaces are independently assignable in Material Designer and exported in per-end folders. Stairs and automatic access doors are not included.
+
+Each opening in the right-hand Walls & openings list has its own accessible delete button. Deletion is undoable and removes only that opening.
+
+The Textures viewport toggle beside Floor guides switches assigned material previews on/off. It does not change material assignments or exported materials.
+
+Opening edits have an independent snap increment (default 5 cm, selectable down to 1 cm) in Walls & openings. Alt/Option uses 1 cm during dragging. Separate end cladding supports face selection/highlighting; opening surrounds no longer prevent selecting their own opening.
+
+Material tint supports 0–100% strength in both the shared material editor and per-surface overrides; previews and GLB materials use the same blended colour. This controls tint strength, not surface transparency.
+
+End walls & gables and Platforms have separate top-level Component Settings accordions after Roof, including direct enable controls when roof detailing is not yet configured.
+
+Platforms support full wall width or a centred custom width in metres, independently at each end; rails and supports follow the deck width.
+
+Lean-to roofs retain closed side/high walls when detailing is enabled. Roof edges are independently assignable in Material Designer (lean-tos with or without detailing, and other detailed roofs).
+
+Cylinder/donut end-band stones use continuous curved-face UV wrapping with planar tops and radial ends in Cleaner and material previews.
+
+Configured terrain patches are assignable in full-scene Material Designer, with automatic top-down metre UVs, live texture previews and exported material bindings. Deselect components before opening Materials to include terrain.
+
+Glass material presets and per-surface overrides support tint, transparency, reflection strength and roughness, with neutral reflection environments in editor/Designer. Uses lightweight alpha transparency; refractive transmission and Unity shader conversion are not implemented.

@@ -60,3 +60,13 @@ test('side fascia length offsets extend both ends, scale and validate',()=>{
  assert.doesNotThrow(()=>validate({...fresh(),parts:[p]}));
  p.roofDetails.sideFascia!.lengthOffset=NaN;assert.throws(()=>validate({...fresh(),parts:[p]}),/fascia/);
 });
+
+test('roof material surfaces split trim without losing triangles',async()=>{
+ const {splitRoofSurfaces}=await import('./roof-details');
+ const p=part();p.roof='gable';p.roofDetails={...defaultRoofDetails(),fascia:true,ridgeCap:true,ridgeBeam:true};
+ const roof=partGeometry(p,true),count=roof.getAttribute('position').count;
+ const surfaces=splitRoofSurfaces(roof);
+ assert.deepEqual(surfaces.map(s=>s.name).sort(),['Roof','Roof edges','Side fascia','End fascia','Ridge cap','Ridge beam'].sort());
+ assert.equal(surfaces.reduce((n,s)=>n+s.geometry.getAttribute('position').count,0),count);
+ for(const s of surfaces){assert.ok(s.geometry.getAttribute('normal'));s.geometry.dispose();}
+});

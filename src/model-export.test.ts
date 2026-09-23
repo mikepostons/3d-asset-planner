@@ -20,3 +20,15 @@ test('model export isolates meshes, preserves transforms and generates valid bin
  const json=JSON.parse(new TextDecoder().decode(new Uint8Array(data,20,view.getUint32(12,true))));assert.equal(json.meshes.length,1);assert.ok(json.nodes.some((n:{name:string})=>n.name===p.name));
  }finally{globalThis.FileReader=previous;disposeExport(result.root);}
 });
+
+test('terrain keeps independent material identities and UVs through export',async()=>{
+ const {applyTextureMaterials}=await import('./texture-materials');
+ const plan={...fresh(),parts:[part()],materialAssignments:{'terrain:patch:a':'grass','terrain:patch:b':'mud'}};
+ const terrain=new T.Group();
+ for(const id of ['a','b']){const mesh=new T.Mesh(new T.PlaneGeometry(2,2),new T.MeshStandardMaterial());mesh.name=`Terrain ${id}`;mesh.userData={terrainPatch:true,surfaceKey:`terrain:patch:${id}`};terrain.add(mesh);}
+ const result=prepareModelExport(new T.Group(),terrain,plan,false);
+ await applyTextureMaterials(result.root,plan,[{id:'grass',name:'Grass',tint:'#00ff00',scale:1,rotation:0,roughness:1},{id:'mud',name:'Mud',tint:'#804020',scale:1,rotation:0,roughness:1}]);
+ const colours:Record<string,string>={};result.root.traverse(o=>{if(o instanceof T.Mesh)colours[o.userData.surfaceKey]=(o.material as T.MeshStandardMaterial).color.getHexString();});
+ assert.deepEqual(colours,{'terrain:patch:a':'00ff00','terrain:patch:b':'804020'});
+ assert.equal(result.report.missingUVs,0);disposeExport(result.root);disposeExport(terrain);
+});

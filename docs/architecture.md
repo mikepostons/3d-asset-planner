@@ -170,3 +170,24 @@ Saved UV recipes are applied to independent export copies by `applyPreparedUVs`.
 `preparationStatus` checks requested part IDs against a scene-wide geometry signature.
 ModelCleaner receives a save callback; main.tsx persists the recipe in the scene and
 applies it in both standalone-model and complete-package exports.
+
+MaterialDesigner.tsx owns a separate preview. texture-materials.ts resolves named
+surface bindings and prepares Three.js materials for preview and export. Metadata
+validation lives separately in texture-material-model.ts for browser/server reuse.
+Materials are loaded through the local library API; scene geometry keys exclude
+assignments to avoid invalidating UVs or rebuilding procedural geometry.
+
+### Live material preview
+
+Stage refreshes saved material assignments separately from geometry-change detection. It prepares projection UVs and materials on disposable copies, then transfers them to live meshes only if its request is still current. Rebuilds and disposal invalidate pending loads. Reference capture rebuilds plain geometry; X-ray retains its translucent editing appearance. Material Designer thumbnail selection applies immediately, while Save assignments persists the scene.
+
+MaterialsManager has browse/edit/create states. The browser grid and edit drawer
+scroll independently; save actions stay outside the scroll region. Dirty drafts
+require an explicit discard when navigating away. MaterialDesigner numeric placement
+inputs hold text locally and commit valid numbers on blur or Enter.
+
+Wall builders emit outward-facing exterior triangles (including opening reveals/interiors with appropriate orientation). Projection UVs derive their horizontal axis from the geometric normal, so winding must match gable infills. Cleaner preparation mapping version 3 invalidates results produced before the wall-winding correction.
+
+`detailedRoof` records named triangle ranges; `splitRoofSurfaces` separates them for the stage without changing vertex positions. Each named mesh receives its own stable material surface key in the existing preview/export pipeline. Parametric geometry consumers can still use the complete merged roof geometry.
+
+Detailed gable walls now use `end-walls.ts` and extended opening contours instead of stage-level convex gable infills. Continuous exterior walls triangulate directly to the roof profile. `platforms.ts` derives full-width end platforms and named material meshes from optional roof-detail settings. `EndWallControls.tsx` edits these settings; numeric changes commit on blur/Enter. Cleaner preparation version 4 reflects the changed wall topology.

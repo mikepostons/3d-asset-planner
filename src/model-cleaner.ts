@@ -1,3 +1,4 @@
+import {foundationFor} from "./foundations";
 import {repairMeshes} from "./mesh-repair";
 import {geometryKey} from "./geometry-key";
 import type {Plan} from "./model";
@@ -14,7 +15,9 @@ export function generateUVs(root:T.Object3D,metresPerTile=1){
   const n=v[1].clone().sub(v[0]).cross(v[2].clone().sub(v[0])).normalize();
   if(n.lengthSq()<1e-12)n.set(0,1,0);
   const centre=v[0].clone().add(v[1]).add(v[2]).multiplyScalar(1/3);
-  const side=o.userData.uvSurface==='cylinder' && Math.hypot(n.x,n.z)>1e-5 ? (n.x*centre.x+n.z*centre.z>=0?1:-1):0;
+  const radial=n.x*centre.x+n.z*centre.z;
+  const curved=o.userData.uvSurface==='cylinder' || (o.userData.uvSurface==='cylinder-band' && Math.abs(radial)>Math.hypot(centre.x,centre.z)*.5);
+  const side=curved && Math.hypot(n.x,n.z)>1e-5 ? (radial>=0?1:-1):0;
   triangles.push({v,n,side});
  }
  const profiles=new Map<number,{radius:number;slope:number;minY:number}>();
@@ -48,6 +51,18 @@ export function generateUVs(root:T.Object3D,metresPerTile=1){
 }
 export function cleanerDiagnostics(root:T.Object3D){let meshes=0,triangles=0,missingUVs=0,degenerate=0;root.traverse(o=>{if(!(o instanceof T.Mesh))return;meshes++;const g=o.geometry,p=g.getAttribute('position');triangles+=(g.index?.count??p.count)/3;if(!g.getAttribute('uv'))missingUVs++;for(let i=0;i<(g.index?.count??p.count);i+=3){const v=[0,1,2].map(j=>new T.Vector3().fromBufferAttribute(p,g.index?.getX(i+j)??i+j));if(v[1].sub(v[0]).cross(v[2].sub(v[0])).lengthSq()<1e-16)degenerate++;}});return{meshes,triangles,missingUVs,degenerate};}
 
-export function preparationKey(plan:Plan){return geometryKey({mappingVersion:2,parts:plan.parts,foundation:plan.foundation,structureFoundations:plan.structureFoundations});}
-export function preparationStatus(plan:Plan,ids:string[]){const key=preparationKey(plan);return ids.every(id=>plan.preparedUVs?.[id]?.sourceKey===key);}
-export function applyPreparedUVs(root:T.Object3D,plan:Plan){const key=preparationKey(plan);let count=0;root.traverse(node=>{const id=node.userData.partId;const saved=plan.preparedUVs?.[id];if(saved?.sourceKey===key){if(saved.repair)repairMeshes(node);count+=generateUVs(node,saved.metresPerTile);if(saved.repair)repairMeshes(node);}});return count;}
+export function preparationKey(plan:Plan){
+ return geometryKey({mappingVersion:6,parts:plan.parts,foundations:plan.parts.map(p=>({id:p.id,settings:foundationFor(plan,p)}))});
+}
+function preparationMatches(plan:Plan,sourceKey:string|undefined,current=preparationKey(plan)){
+ if(!sourceKey)return false;
+ if(sourceKey===current)return true;
+ // Older preparations stored raw foundation switches, including inactive settings.
+ try {
+  const old=JSON.parse(sourceKey);
+  if(old.mappingVersion!==6 || !Array.isArray(old.parts) || old.foundations!==undefined)return false;
+  return preparationKey({...plan,parts:old.parts,foundation:old.foundation,structureFoundations:old.structureFoundations})===current;
+ }catch{return false;}
+}
+export function preparationStatus(plan:Plan,ids:string[]){const current=preparationKey(plan);return ids.every(id=>preparationMatches(plan,plan.preparedUVs?.[id]?.sourceKey,current));}
+export function applyPreparedUVs(root:T.Object3D,plan:Plan){const current=preparationKey(plan);let count=0;root.traverse(node=>{const id=node.userData.partId;const saved=plan.preparedUVs?.[id];if(saved&&preparationMatches(plan,saved.sourceKey,current)){if(saved.repair)repairMeshes(node);count+=generateUVs(node,saved.metresPerTile);if(saved.repair)repairMeshes(node);}});return count;}

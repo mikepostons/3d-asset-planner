@@ -1,7 +1,12 @@
+import {reflectionEnvironment} from "./reflection-environment";
+import {platformGeometry} from "./platforms";
+import {applyTextureMaterials,type TextureMaterial} from "./texture-materials";
+import {generateUVs} from "./model-cleaner";
+import {disposeExport} from "./model-export";
 import {foundationFor,foundationGeometry,foundationDefaults} from "./foundations";
 import { prepareModelExport } from "./model-export";
 import { geometryKey } from "./geometry-key";
-import { gableInfill } from "./roof-details";
+import { splitRoofSurfaces } from "./roof-details";
 import { dressingGeometry } from "./stone-dressing";
 import { architecturalGeometry } from "./architectural-details";
 import { infillGeometry } from "./infills";
@@ -88,7 +93,9 @@ export class Stage {
   drawShape: "rectangle" | "circle" = "rectangle";
   addShape: Primitive = "cube";
   preview = new T.Group();
+  openingSnap = .05;
   showFloors = true;
+  showTextures = true;
   showTerrain = true;
   xray = false;
   tooltip = document.createElement("div");
@@ -113,6 +120,7 @@ export class Stage {
     drawY?: number;
     last?: Plan;
   } = null;
+  private disposeEnvironment?:()=>void;
   constructor(host: HTMLElement, d: Plan, cb: Callbacks) {
     this.host = host;
     this.tooltip.className = "handle-tooltip";
@@ -125,6 +133,7 @@ export class Stage {
       antialias: true,
       preserveDrawingBuffer: true,
     });
+    this.disposeEnvironment=reflectionEnvironment(this.renderer,this.scene);
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
     this.renderer.setClearColor("#20292e");
     this.renderer.outputColorSpace = T.SRGBColorSpace;
@@ -168,19 +177,59 @@ export class Stage {
       if (o instanceof T.Mesh || o instanceof T.Line) {
         o.geometry.dispose();
         const m = o.material;
-        Array.isArray(m) ? m.forEach((x) => x.dispose()) : m.dispose();
+        for (const material of Array.isArray(m)?m:[m]) {
+          const textured=material as T.MeshStandardMaterial;
+          for(const texture of [textured.map,textured.normalMap,textured.roughnessMap,textured.metalnessMap,textured.aoMap])texture?.dispose();
+          material.dispose();
+        }
       }
     });
     g.clear();
   }
+  private materialRequest = 0;
+  private materialRecords?: Promise<TextureMaterial[]>;
+  private materialKey = "";
+  private async previewMaterials() {
+    const request = ++this.materialRequest;
+    if (this.showTextures === false || this.exporting || this.xray || !Object.keys(this.plan.materialAssignments ?? {}).length) return;
+    const plan = this.plan;
+    const copy = new T.Group();
+    const pairs: Array<[T.Mesh,T.Mesh]> = [];
+    // Traverse both collections without reparenting live objects.
+    const visit = (o:T.Object3D) => {
+      if (!(o instanceof T.Mesh)) return;
+      const key = o.userData.surfaceKey ?? `${o.userData.part ?? "terrain"}:${o.name || "Surface"}`;
+      if (!plan.materialAssignments?.[key]) return;
+      const mesh = new T.Mesh(o.geometry.clone(), Array.isArray(o.material) ? o.material.map(m=>m.clone()) : o.material.clone());
+      mesh.userData = {...o.userData, surfaceKey:key};
+      if(!o.userData.terrainPatch) generateUVs(mesh,plan.preparedUVs?.[o.userData.part]?.metresPerTile ?? 1);
+      copy.add(mesh); pairs.push([o,mesh]);
+    };
+    this.solids.traverse(visit); this.terrain?.traverse(visit);
+    try {
+      this.materialRecords ??= import("./library").then(m=>m.libraryRequest<TextureMaterial[]>("/materials"));
+      await applyTextureMaterials(copy,plan,await this.materialRecords);
+      if (request !== this.materialRequest) return;
+      for (const [original,prepared] of pairs) {
+        original.geometry.dispose();
+        for (const m of Array.isArray(original.material)?original.material:[original.material]) m.dispose();
+        original.geometry=prepared.geometry; original.material=prepared.material;
+      }
+      copy.clear(); // Ownership of the prepared resources has moved to the live meshes.
+    } catch(error) { console.error("Scene material preview:",error); this.materialRecords=undefined; }
+    finally { disposeExport(copy); }
+  }
   private lastUpdateKey = "";
   update(d: Plan, selected: string | null, tool: Tool) {
+    const materialKey=JSON.stringify([d.materialAssignments,d.materialOverrides,d.preparedUVs]);
+    const materialsChanged=materialKey!==this.materialKey;
+    if(materialsChanged){this.materialKey=materialKey;this.materialRecords=undefined;}
     const key = geometryKey({d, selected, tool, selectionMode:this.selectionMode,
       drawShape:this.drawShape,addShape:this.addShape,showFloors:this.showFloors,
-      showTerrain:this.showTerrain,xray:this.xray,activeFace:this.activeFace,
+      showTextures:this.showTextures,showTerrain:this.showTerrain,xray:this.xray,activeFace:this.activeFace,
       selectedCluster:this.selectedCluster,selectedOpening:this.selectedOpening,
       selectedOpenings:this.selectedOpenings,openingKind:this.openingKind,view:this.view});
-    if (key === this.lastUpdateKey) { this.plan = d; return; }
+    if (key === this.lastUpdateKey) { this.plan = d; if(materialsChanged)this.rebuild(); return; }
     this.lastUpdateKey = key;
     if (
       (this.drag || this.openingDrag) &&
@@ -214,6 +263,7 @@ export class Stage {
     );
   }
   rebuild() {
+    ++this.materialRequest;
     this.tooltip.hidden = true;
     this.disposeGroup(this.hover);
     this.disposeGroup(this.solids);
@@ -280,16 +330,20 @@ export class Stage {
         new T.Float32BufferAttribute(vertices, 3),
       );
       geometry.computeVertexNormals();
-      this.terrain.add(
-        new T.Mesh(
+      const terrainMesh = new T.Mesh(
           geometry,
           new T.MeshStandardMaterial({
             color: 0x68715b,
             roughness: 1,
             side: T.DoubleSide,
           }),
-        ),
-      );
+        );
+      terrainMesh.name = this.plan.terrainLayout === "scene" ? "Scene terrain" : `Terrain · ${patch.parts.map(id=>this.plan.parts.find(p=>p.id===id)?.name??id).join(", ")}`;
+      terrainMesh.userData={terrainPatch:true,surfaceKey:this.plan.terrainLayout==="scene"?"terrain:scene":`terrain:patch:${[...patch.parts].sort().join("+")}`,materialDescription:this.plan.terrainMaterial?.description};
+      const pos=geometry.getAttribute("position"),uv:number[]=[];
+      for(let i=0;i<pos.count;i++)uv.push(pos.getX(i),-pos.getZ(i));
+      geometry.setAttribute("uv",new T.Float32BufferAttribute(uv,2));
+      this.terrain.add(terrainMesh);
     }
     this.terrain.visible = this.showTerrain;
     const members = selectedParts(this.plan, this.selected);
@@ -313,15 +367,19 @@ export class Stage {
       if(p.shape === "circle") wall.userData.uvSurface="cylinder";
       wall.userData.part = p.id;
       group.add(wall);
-      if(p.roofDetails && p.roofEnabled!==false && p.roof==="gable") {
-        const skin=partGeometry({...p,roofDetails:{...p.roofDetails,fascia:false,ridgeCap:false}},true);
-        for(const item of gableInfill(p,skin)) {
-          const infill=new T.Mesh(item.geometry,new T.MeshStandardMaterial({color:item.mode==="wall"?(p.role==="main"?0x9caeaf:0x6d9993):0x958773,side:T.DoubleSide,roughness:1,transparent:this.xray,opacity:this.xray?.22:1}));
-          infill.userData={part:p.id,gableEnd:item.end,materialDescription:item.mode==="wall"?p.materials:item.material};group.add(infill);
+      if(wall.geometry.userData.roofSurfaces){
+        const surfaces=splitRoofSurfaces(wall.geometry);wall.geometry=surfaces[0].geometry;
+        for(const surface of surfaces.slice(1)){
+          const mesh=new T.Mesh(surface.geometry,new T.MeshStandardMaterial({color:0x958773,side:T.DoubleSide,roughness:1,transparent:this.xray,opacity:this.xray?.22:1}));
+          const end=surface.name.includes("1")?0:1;
+          mesh.name=surface.name;mesh.userData={part:p.id,wall:true,gableEnd:end,materialDescription:(end && p.roofDetails?.gableSeparate ? p.roofDetails?.gableEndMaterial : p.roofDetails?.gableStartMaterial)??"Timber cladding"};group.add(mesh);
         }
-        skin.dispose();
       }
 
+      for(const item of platformGeometry(p)){
+        const mesh=new T.Mesh(item.geometry,new T.MeshStandardMaterial({color:0x967751,roughness:1,side:T.DoubleSide,transparent:this.xray,opacity:this.xray?.22:1}));
+        mesh.name=item.name;mesh.userData={part:p.id,platformEnd:item.end};group.add(mesh);
+      }
       for (const item of dressingGeometry(p, this.plan.parts)) {
         const mesh = new T.Mesh(
           item.geometry,
@@ -338,6 +396,7 @@ export class Stage {
         mesh.userData = {
           part: p.id,
           stoneDressing: true,
+          ...(["Top band stone","Bottom band stone","Solid cap"].includes(item.name)?{uvSurface:"cylinder-band"}:{}),
           clusterId: item.clusterId,
           materialDescription: item.material,
         };
@@ -379,11 +438,19 @@ export class Stage {
           group.add(mesh);
         }
       const roof = p.roofEnabled === false ? null : this.roof(p);
+      const roofMeshes:T.Mesh<T.BufferGeometry,T.MeshStandardMaterial>[]=[];
       if (roof) {
         roof.name = "Roof";
         roof.userData.part = p.id;
         if(p.shape === "circle") roof.userData.uvSurface="cylinder";
-        group.add(roof);
+        const surfaces=splitRoofSurfaces(roof.geometry);
+        roof.geometry=surfaces[0].geometry;
+        roofMeshes.push(roof);
+        for(const surface of surfaces.slice(1)){
+          const detail=new T.Mesh(surface.geometry,roof.material.clone());
+          detail.name=surface.name;detail.userData={part:p.id};roofMeshes.push(detail);
+        }
+        group.add(...roofMeshes);
       }
       const foundation=foundationFor(this.plan,p);
       if(foundation){
@@ -394,8 +461,10 @@ export class Stage {
       this.solids.add(group);
       if (this.activeFace?.partId === p.id && p.shape !== "circle") {
         const f = wallFrame(p, this.activeFace.index);
-        const attr = wall.geometry.getAttribute("position"),
-          positions: number[] = [];
+        const positions: number[] = [];
+        for(const surface of group.children){
+        if(!(surface instanceof T.Mesh) || !surface.userData.wall)continue;
+        const attr = surface.geometry.getAttribute("position");
         for (let i = 0; i < attr.count; i += 3) {
           const pts = [0, 1, 2].map((k) =>
             new T.Vector3().fromBufferAttribute(attr, i + k),
@@ -406,6 +475,7 @@ export class Stage {
             )
           )
             positions.push(...pts.flatMap((v) => v.toArray()));
+        }
         }
         const geom = new T.BufferGeometry();
         geom.setAttribute(
@@ -477,7 +547,7 @@ export class Stage {
           depth.rotation.copy(group.rotation);
           depth.renderOrder = 8;
           this.aids.add(depth);
-          if (this.tool === "select") {
+          if (this.tool === "select" || this.tool === "move") {
             for (const [key, u, v] of [
               ["move", 0.5, 0.5],
               ["w", 0, 0.5],
@@ -489,7 +559,7 @@ export class Stage {
               ["nw", 0, 1],
               ["ne", 1, 1],
             ] as [string, number, number][]) {
-              if (this.selectedOpenings.length > 1 && key !== "move") continue;
+              if ((this.tool === "move" || this.selectedOpenings.length > 1) && key !== "move") continue;
               const handle = new T.Mesh(
                 new T.SphereGeometry(key === "move" ? 0.14 : 0.1, 12, 8),
                 new T.MeshBasicMaterial({
@@ -533,12 +603,12 @@ export class Stage {
         overlay.renderOrder = 5;
         this.aids.add(overlay);
       }
-      for (const mesh of roof ? [wall, roof] : [wall]) {
+      for (const mesh of [wall, ...roofMeshes]) {
         mesh.material.transparent = this.xray;
         mesh.material.opacity = this.xray ? 0.22 : 1;
         mesh.material.depthWrite = !this.xray;
       }
-      for (const mesh of roof ? [wall, roof] : [wall]) {
+      for (const mesh of [wall, ...roofMeshes]) {
         const line = new T.LineSegments(
           new T.EdgesGeometry(mesh.geometry, 25),
           new T.LineBasicMaterial({
@@ -556,7 +626,7 @@ export class Stage {
         (p.id !== members[0]?.id || (collection && this.tool !== "move"))
       )
         this.aids.add(new T.BoxHelper(group, 0x48d4c0));
-      if (p.id === members[0]?.id && (!collection || this.tool === "move")) {
+      if (p.id === members[0]?.id && (!collection || this.tool === "move") && !(this.tool === "move" && this.selectedOpenings.length)) {
         const outline = new T.BoxHelper(group, 0x48d4c0);
         this.aids.add(outline);
         const rot = (x: number, z: number) =>
@@ -774,6 +844,7 @@ export class Stage {
         0.5,
       ),
     );
+    void this.previewMaterials();
   }
   handle(
     kind: string,
@@ -842,40 +913,42 @@ export class Stage {
     this.cb.opening(ids.at(-1) ?? null, ids);
     return true;
   }
+  startOpeningDrag(e: PointerEvent, hit: {p: Part; o: Opening; handle: string}) {
+    const {p, o} = hit;
+    if (e.shiftKey) {
+      this.chooseOpening(p.id, o.id, o.face, true);
+      return;
+    }
+    const point = this.openingPoint(e, p, o.face);
+    const already = this.selected === p.id && this.selectedOpenings.includes(o.id);
+    if (!already) {
+      this.chooseOpening(p.id, o.id, o.face);
+      // Keep pointer state in sync before React's selection update arrives.
+      this.selected = p.id;
+      this.selectedOpening = o.id;
+      this.selectedOpenings = [o.id];
+      this.activeFace = {partId: p.id, index: o.face};
+    }
+    if (!point) return;
+    const handle = this.tool === "move" ? "move" : hit.handle;
+    this.openingDrag = {
+      start: point, partId: p.id, face: o.face, capture: e.pointerId,
+      original: {...o},
+      originals: handle === "move"
+        ? (p.openings ?? []).filter(v => this.selectedOpenings.includes(v.id)).map(v => ({...v}))
+        : undefined,
+      handle,
+    };
+    this.controls.enabled = false;
+    this.renderer.domElement.setPointerCapture(e.pointerId);
+  }
   down = (e: PointerEvent) => {
     this.tooltip.hidden = true;
     if (e.button !== 0) return;
-    if (this.tool === "select") {
+    if (this.tool === "select" || this.tool === "move") {
       const hit = this.pickOpening(e);
       if (hit) {
-        const { p, o, handle } = hit;
-        const point = this.openingPoint(e, p, o.face);
-        if (e.shiftKey) {
-          this.chooseOpening(p.id, o.id, o.face, true);
-          e.stopImmediatePropagation();
-          return;
-        }
-        const already =
-          this.selected === p.id && this.selectedOpenings.includes(o.id);
-        if (!already) this.chooseOpening(p.id, o.id, o.face);
-        if (point && already) {
-          this.openingDrag = {
-            start: point,
-            partId: p.id,
-            face: o.face,
-            capture: e.pointerId,
-            original: { ...o },
-            originals:
-              handle === "move"
-                ? (p.openings ?? [])
-                    .filter((v) => this.selectedOpenings.includes(v.id))
-                    .map((v) => ({ ...v }))
-                : undefined,
-            handle,
-          };
-          this.controls.enabled = false;
-          this.renderer.domElement.setPointerCapture(e.pointerId);
-        }
+        this.startOpeningDrag(e, hit);
         e.stopImmediatePropagation();
         return;
       }
@@ -1069,10 +1142,11 @@ export class Stage {
         handle: data.openingHandle as string,
       };
     }
-    const solidDistance =
+    const solidHit =
       this.ray
         .intersectObjects(this.solids.children, true)
-        .find((hit) => hit.object instanceof T.Mesh)?.distance ?? Infinity;
+        .find((hit) => hit.object instanceof T.Mesh);
+    const solidDistance=solidHit?.distance??Infinity;
     const candidates: {
       p: Part;
       o: Opening;
@@ -1129,7 +1203,7 @@ export class Stage {
           .applyAxisAngle(new T.Vector3(0, 1, 0), (p.rotation * Math.PI) / 180)
           .add(new T.Vector3(p.x, baseY(p), p.z));
         const distance = world.distanceTo(this.ray.ray.origin);
-        if (this.xray || distance <= solidDistance + 0.05)
+        if (this.xray || (solidHit?.object.userData.part===p.id && solidHit.object.userData.openingId===o.id) || distance <= solidDistance + 0.05)
           candidates.push({ p, o, handle: "move", distance });
       }
     return candidates.sort((a, b) => a.distance - b.distance)[0];
@@ -1174,12 +1248,12 @@ export class Stage {
         p = this.plan.parts.find((p) => p.id === drag.partId)!;
       const q = this.openingPoint(e, p, drag.face);
       if (!q) return;
-      const step = this.plan.moduleSize / this.plan.subdivision,
+      const step = e.altKey ? .01 : this.openingSnap,
         f = wallFrame(p, drag.face);
       const x = snap(Math.min(q.x, drag.start.x), step),
         y = snap(Math.min(q.y, drag.start.y), step);
-      let width = Math.max(step, snap(Math.abs(q.x - drag.start.x), step)),
-        h = Math.max(step, snap(Math.abs(q.y - drag.start.y), step));
+      let width = Math.max(.1, snap(Math.abs(q.x - drag.start.x), step)),
+        h = Math.max(.1, snap(Math.abs(q.y - drag.start.y), step));
       if (this.openingKind === "circle-window") width = h = Math.max(width, h);
       const bottom = this.openingKind.endsWith("door")
         ? Math.max(f.baseA, f.baseB)
@@ -1247,7 +1321,7 @@ export class Stage {
       this.scene.add(this.preview);
       if (valid)
         this.cb.hint(
-          `${o.name}: ${o.width.toFixed(2)} × ${o.height.toFixed(2)} m · release to ${drag.original ? "apply" : "create"}`,
+          `${o.name}: ${o.width.toFixed(3)} × ${o.height.toFixed(3)} m · position ${o.x.toFixed(3)}, ${o.y.toFixed(3)} m · ${step*100} cm snap · release to ${drag.original ? "apply" : "create"}`,
         );
       return;
     }
@@ -1272,7 +1346,7 @@ export class Stage {
       return;
     }
     if (!this.drag) {
-      const opening = this.tool === "select" ? this.pickOpening(e) : null;
+      const opening = this.tool === "select" || this.tool === "move" ? this.pickOpening(e) : null;
       if (opening) {
         this.disposeGroup(this.hover);
         const { p, o } = opening,
@@ -2032,7 +2106,7 @@ export class Stage {
           o.id,
           copies.map((v) => v.id),
         );
-        this.cb.tool("select");
+        if (!drag.original) this.cb.tool("select");
         this.cb.hint(
           "Opening ready · drag its centre to move, or handles to resize",
         );
@@ -2132,10 +2206,8 @@ export class Stage {
     this.disposeGroup(this.preview);
     this.exporting = true;
     const wasXray = this.xray;
-    if (wasXray) {
-      this.xray = false;
-      this.rebuild();
-    }
+    this.xray = false;
+    this.rebuild();
     const terrainVisible = this.terrain.visible;
     this.terrain.visible = includeTerrain;
     const result: Record<string, Blob> = {};
@@ -2183,10 +2255,8 @@ export class Stage {
     } finally {
       this.terrain.visible = terrainVisible;
       this.exporting = false;
-      if (wasXray) {
-        this.xray = true;
-        this.rebuild();
-      }
+      this.xray = wasXray;
+      this.rebuild();
       this.renderer.setPixelRatio(pixel);
       this.renderer.setSize(old.x, old.y, false);
       this.hover.visible = true;
@@ -2202,6 +2272,7 @@ export class Stage {
     this.renderer.render(this.scene, this.camera);
   };
   dispose() {
+    ++this.materialRequest;
     this.tooltip.remove();
     cancelAnimationFrame(this.raf);
     this.observer.disconnect();
@@ -2212,6 +2283,7 @@ export class Stage {
     this.disposeGroup(this.hover);
     this.disposeGroup(this.terrain);
     window.removeEventListener("keydown", this.key);
+    this.disposeEnvironment?.();
     this.renderer.dispose();
     this.renderer.domElement.remove();
   }
